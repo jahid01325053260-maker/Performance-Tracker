@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:pdfrx/pdfrx.dart';
@@ -11,7 +12,32 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   pdfrxFlutterInitialize();
   try {
-    await Firebase.initializeApp();
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+      // The desktop runner has no Android google-services.json. These values
+      // are supplied by --dart-define-from-file at Windows build time.
+      const apiKey = String.fromEnvironment('FIREBASE_API_KEY');
+      const appId = String.fromEnvironment('FIREBASE_APP_ID');
+      const senderId = String.fromEnvironment('FIREBASE_MESSAGING_SENDER_ID');
+      const projectId = String.fromEnvironment('FIREBASE_PROJECT_ID');
+      const authDomain = String.fromEnvironment('FIREBASE_AUTH_DOMAIN');
+      if (apiKey.isEmpty || appId.isEmpty || senderId.isEmpty ||
+          projectId.isEmpty || authDomain.isEmpty) {
+        throw StateError('Windows app connection settings are missing. '
+            'Rebuild the application with the required configuration.');
+      }
+      await Firebase.initializeApp(
+        options: const FirebaseOptions(
+          apiKey: apiKey,
+          appId: appId,
+          messagingSenderId: senderId,
+          projectId: projectId,
+          authDomain: authDomain,
+        ),
+      );
+    } else {
+      // Android continues to use its existing google-services.json setup.
+      await Firebase.initializeApp();
+    }
     runApp(const PerformanceTrackerApp());
   } catch (error) {
     runApp(MaterialApp(home: Scaffold(body: Center(child: Padding(
