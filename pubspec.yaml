@@ -1,0 +1,39 @@
+name: performance_tracker_flutter
+description: "Cross-platform Performance Tracker - Firebase Spark Free Authentication and Cloud Firestore"
+publish_to: 'none'
+version: 1.2.0+2
+environment:
+  sdk: '>=3.13.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.3.0
+  firebase_core: 4.15.0
+  firebase_auth: 6.7.0
+  # Opt-in local password protection; never persist secrets to SharedPreferences.
+  flutter_secure_storage: 11.2.0
+  cloud_firestore: 6.10.0
+  crypto: ^3.0.6
+  intl: ^0.20.2
+  # v11.0.3 fails Android compilation on Flutter/AGP 9 when built-in Kotlin
+  # is disabled: GeneratedPluginRegistrant cannot find FilePickerPlugin.
+  # v12.2.0 includes the fixed federated Android implementation. This version
+  # changes pickFiles() return values and file byte access (see changed UI code).
+  file_picker: 12.2.0
+  # 2.4.8 uses pdfrx_engine 0.4.7, which fixes nullable-cache errors
+  # that prevented flutter test and Android APK builds with pdfrx 2.4.5.
+  # Pin this exact version until PDF parsing and builds are regression-tested.
+  pdfrx: 2.4.8
+  pdf: ^3.11.3
+  printing: ^5.14.2
+  # Original excel 4.0.6 requires archive 3.x, incompatible with current
+  # pdfrx_engine/image. Community fork supports archive >=4.0.9.
+  excel_community: 2.5.2
+  image: 4.10.1
+  url_launcher: ^6.3.2
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+flutter:
+  uses-material-design: true

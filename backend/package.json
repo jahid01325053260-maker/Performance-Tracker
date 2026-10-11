@@ -1,0 +1,22 @@
+{
+  "name": "performance-tracker-firebase-functions",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "start": "node src/local.js",
+    "test": "node --test test/*.test.js",
+    "check": "node --check src/index.js && node --check src/server.js && node --check src/local.js && node --check src/logic.js",
+    "bootstrap": "node scripts/bootstrap_admin.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "firebase-admin": "^13.2.0",
+    "multer": "^2.4.0",
+    "pdf-parse": "^1.1.1",
+    "firebase-functions": "^6.4.0"
+  },
+  "main": "src/index.js"
+}

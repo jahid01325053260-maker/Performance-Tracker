@@ -1,0 +1,353 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function loggedIn() { return request.auth != null; }
+    function identityPath() { return /databases/$(database)/documents/auth_users/$(request.auth.uid); }
+    function myIdentity() { return get(identityPath()).data; }
+    function myId() { return myIdentity().employeeId; }
+    function myRole() { return myIdentity().role; }
+    function approved() {
+      return loggedIn() && exists(identityPath()) &&
+        myIdentity().status == 'Approved' &&
+        exists(/databases/$(database)/documents/employees/$(myId())) &&
+        get(/databases/$(database)/documents/employees/$(myId())).data.authUid == request.auth.uid &&
+        get(/databases/$(database)/documents/employees/$(myId())).data.status == 'Approved' &&
+        get(/databases/$(database)/documents/employees/$(myId())).data.role == myRole();
+    }
+    function admin() { return approved() && myRole() == 'ADMIN'; }
+    // AGM/DGM may READ all private officer reports; only ADMIN may mutate.
+    function globalReportReader() { return approved() && myRole() in ['ADMIN','AGM','DGM']; }
+    function ownEmployee(empId) { return approved() && myId() == empId; }
+    function validId(id) { return id is string && id.matches('^[0-9]{12}$'); }
+    function userFields() { return ['name','mobile','email','officialNumber','profileImage']; }
+    function profileFields() {
+      return ['name','mobile','email','officialNumber','profileImage',
+        'branch','zone','department','salesManager','managerId'];
+    }
+    function accountFormat() {
+      return request.resource.data.accountNo is string &&
+        request.resource.data.accountNo.matches('^[0-9]{4}-?906-?[0-9]{6}$');
+    }
+    function periodFormat() {
+      return request.resource.data.reportingPeriod is string &&
+        request.resource.data.reportingPeriod.matches('^[0-9]{4}-(0[1-9]|1[0-2])$');
+    }
+    function validRecord() {
+      return validId(request.resource.data.employeeId) &&
+        periodFormat() &&
+        request.resource.data.status in ['confirmed','deleted'] &&
+        (request.resource.data.limit == 'NIL' || accountFormat());
+    }
+
+    // Public PRE-LOGIN catalog with only manager name + employee ID.
+    // Avoid granting unauthenticated access to full employees documents.
+    match /sales_manager_directory/{managerId} {
+      allow read: if true;
+      allow create, update: if admin() && validId(managerId) &&
+        request.resource.data.keys().hasOnly(['employeeId','name']) &&
+        request.resource.data.employeeId == managerId &&
+        request.resource.data.name is string &&
+        getAfter(/databases/$(database)/documents/employees/$(managerId)).data.role == 'Sales Manager' &&
+        getAfter(/databases/$(database)/documents/employees/$(managerId)).data.status == 'Approved' &&
+        getAfter(/databases/$(database)/documents/employees/$(managerId)).data.name == request.resource.data.name;
+      allow delete: if admin();
+    }
+
+    match /manager_change_requests/{officerId} {
+      allow read: if admin() || ownEmployee(officerId);
+      allow create, update: if ownEmployee(officerId) && myRole() == 'USER' &&
+        request.resource.data.keys().hasOnly([
+          'employeeId','authUid','managerId','managerName','status','createdAt']) &&
+        request.resource.data.employeeId == officerId &&
+        request.resource.data.authUid == request.auth.uid &&
+        request.resource.data.status == 'Pending' &&
+        request.resource.data.createdAt == request.time &&
+        request.resource.data.managerId is string &&
+        exists(/databases/$(database)/documents/sales_manager_directory/$(request.resource.data.managerId)) &&
+        request.resource.data.managerName ==
+          get(/databases/$(database)/documents/sales_manager_directory/$(request.resource.data.managerId)).data.name;
+      allow delete: if admin();
+    }
+
+    match /login_index/{indexId} {
+      // Legacy compatibility: pre-login doc.get() by SHA256(Employee ID).
+      // NOTE: known privacy trade-off (email lookup); list forbidden.
+      allow get: if true;
+      allow list: if false;
+      // Legacy login_index documents are read-only during migration.
+      // Fresh registrations derive the private alias without indexing.
+      allow create, update, delete: if false;
+    }
+
+    match /auth_users/{uid} {
+      allow get: if loggedIn() && (request.auth.uid == uid || admin());
+      allow list: if admin();
+      allow create: if loggedIn() && uid == request.auth.uid &&
+        request.resource.data.keys().hasOnly(['employeeId','role','status']) &&
+        validId(request.resource.data.employeeId) &&
+        request.resource.data.role == 'USER' &&
+        request.resource.data.status == 'Pending' &&
+        getAfter(/databases/$(database)/documents/employees/$(request.resource.data.employeeId)).data.authUid == uid &&
+        getAfter(/databases/$(database)/documents/employees/$(request.resource.data.employeeId)).data.role == 'USER' &&
+        getAfter(/databases/$(database)/documents/employees/$(request.resource.data.employeeId)).data.status == 'Pending';
+      allow update: if admin() &&
+        request.resource.data.employeeId == resource.data.employeeId &&
+        (request.resource.data.role == resource.data.role ||
+          uid != request.auth.uid) &&
+        (request.resource.data.role == resource.data.role ||
+          resource.data.status == 'Approved') &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role','status']) &&
+        request.resource.data.role in ['USER','Sales Manager','AGM','DGM','ADMIN'] &&
+        request.resource.data.status in ['Pending','Approved','Rejected','Disabled'] &&
+        getAfter(/databases/$(database)/documents/employees/$(resource.data.employeeId)).data.role == request.resource.data.role &&
+        getAfter(/databases/$(database)/documents/employees/$(resource.data.employeeId)).data.status == request.resource.data.status;
+      allow delete: if false;
+    }
+
+    match /employees/{empId} {
+      // Approved directory visible to approved team members; pending only admin/owner.
+      allow get: if admin() || (approved() && resource.data.status in ['Approved', 'APPROVED', 'approved', '']) ||
+        (loggedIn() && resource.data.authUid == request.auth.uid);
+      allow list: if admin() || (approved() &&
+        resource.data.status in ['Approved', 'APPROVED', 'approved', '']);
+      allow create: if loggedIn() && validId(empId) &&
+        request.resource.data.employeeId == empId &&
+        request.resource.data.authUid == request.auth.uid &&
+        request.resource.data.role == 'USER' &&
+        request.resource.data.status == 'Pending' &&
+        request.resource.data.keys().hasOnly([
+          'employeeId','authUid','name','mobile','email','officialNumber',
+          'branch','zone','salesManager','managerId','role','status',
+          'monthlyTarget','yearlyTarget','createdAt']) &&
+        request.resource.data.monthlyTarget == 0 &&
+        request.resource.data.yearlyTarget == 0 &&
+        ( // Pending secondary-auth role creation may not have a manager yet.
+          (request.resource.data.get('managerId', '') == '' &&
+           request.resource.data.get('salesManager', '') == '') ||
+          (request.resource.data.managerId is string &&
+           exists(/databases/$(database)/documents/sales_manager_directory/$(request.resource.data.managerId)) &&
+           request.resource.data.salesManager ==
+             get(/databases/$(database)/documents/sales_manager_directory/$(request.resource.data.managerId)).data.name)
+        ) &&
+        getAfter(identityPath()).data.employeeId == empId &&
+        getAfter(identityPath()).data.role == 'USER' &&
+        getAfter(identityPath()).data.status == 'Pending';
+      allow update: if (
+        admin() && resource.data.employeeId == request.resource.data.employeeId &&
+        resource.data.authUid == request.resource.data.authUid &&
+        (request.resource.data.role == resource.data.role || empId != myId()) &&
+        (request.resource.data.role == resource.data.role ||
+          resource.data.status == 'Approved') &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+          ['name','mobile','email','officialNumber','profileImage',
+           'branch','zone','department','salesManager','managerId','role','status',
+           'monthlyTarget','yearlyTarget']) &&
+        request.resource.data.role in ['USER','Sales Manager','AGM','DGM','ADMIN'] &&
+        request.resource.data.status in ['Pending','Approved','Rejected','Disabled'] &&
+        request.resource.data.monthlyTarget is int &&
+        request.resource.data.monthlyTarget >= 0 &&
+        request.resource.data.yearlyTarget is int &&
+        request.resource.data.yearlyTarget >= 0 &&
+        getAfter(/databases/$(database)/documents/auth_users/$(resource.data.authUid)).data.role == request.resource.data.role &&
+        getAfter(/databases/$(database)/documents/auth_users/$(resource.data.authUid)).data.status == request.resource.data.status
+      ) || (
+        ownEmployee(empId) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(userFields())
+      );
+      allow delete: if false;
+    }
+
+    function scorePath() {
+      return /databases/$(database)/documents/leaderboard/$(myId());
+    }
+    function performancePath(recordId) {
+      return /databases/$(database)/documents/performance/$(recordId);
+    }
+    function proofPath(proofId) {
+      return /databases/$(database)/documents/ranking_proofs/$(proofId);
+    }
+    function proofId() {
+      return getAfter(scorePath()).data.lastProofId;
+    }
+    function linkedRecordId() {
+      return getAfter(proofPath(request.resource.data.lastProofId)).data.recordId;
+    }
+    function hasAtomicScoreFor(recordId) {
+      return proofId() is string &&
+        getAfter(proofPath(proofId())).data.recordId == recordId;
+    }
+    function correctNewScore() {
+      let id = request.resource.data.lastProofId;
+      let r = linkedRecordId();
+      return id is string && id.matches('^[A-Za-z0-9_-]{24}$') &&
+        !exists(proofPath(id)) &&
+        getAfter(proofPath(id)).data.employeeId == myId() &&
+        r is string &&
+        r.matches('^' + myId() + '_[0-9]{4}-(0[1-9]|1[0-2])_[0-9]{13}$') &&
+        !exists(performancePath(r)) &&
+        getAfter(performancePath(r)).data.employeeId == myId() &&
+        getAfter(performancePath(r)).data.status == 'confirmed' &&
+        getAfter(performancePath(r)).data.limit != 'NIL' &&
+        getAfter(performancePath(r)).data.normalizedAccountNo.matches('^[0-9]{4}906[0-9]{6}$');
+    }
+    function nilReplacedAtomically() {
+      let id = proofId();
+      let r = getAfter(proofPath(id)).data.recordId;
+      return id is string && r is string &&
+        r.matches('^' + myId() + '_' + resource.data.reportingPeriod + '_[0-9]{13}$') &&
+        !exists(performancePath(r)) &&
+        getAfter(performancePath(r)).data.employeeId == myId();
+    }
+
+    match /ranking_proofs/{proofId} {
+      // Private linkage of a score update to an immutable applicant record.
+      // Public leaderboard only contains counts and an opaque random pointer.
+      allow get: if admin() ||
+        (approved() && resource.data.employeeId == myId());
+      allow list: if admin();
+      allow create: if approved() && myRole() == 'USER' &&
+        request.resource.data.keys().hasOnly(['employeeId','recordId']) &&
+        request.resource.data.employeeId == myId() &&
+        request.resource.data.recordId is string &&
+        request.resource.data.recordId.matches('^' + myId() + '_[0-9]{4}-(0[1-9]|1[0-2])_[0-9]{13}$') &&
+        !exists(performancePath(request.resource.data.recordId)) &&
+        getAfter(performancePath(request.resource.data.recordId)).data.employeeId == myId() &&
+        getAfter(scorePath()).data.lastProofId == proofId;
+      allow update, delete: if false;
+    }
+
+    match /performance/{recordId} {
+      // Applicant details are private: officers read only their own; admin reads all.
+      // Sales Manager can read assigned team if record has managerId.
+      allow get, list: if globalReportReader() ||
+        (approved() && resource.data.employeeId == myId()) ||
+        (approved() && myRole() == 'Sales Manager' && resource.data.managerId == myId());
+      allow create: if (admin() && validRecord()) || (approved() && myRole() == 'USER' &&
+        request.resource.data.employeeId == myId() && validRecord() &&
+        (request.resource.data.limit == 'NIL' ||
+         (request.resource.data.get('managerId', '') ==
+            get(/databases/$(database)/documents/employees/$(myId())).data.get('managerId', '') &&
+          request.resource.data.get('salesManager', '') ==
+            get(/databases/$(database)/documents/employees/$(myId())).data.get('salesManager', ''))) &&
+        (recordId == myId() + '_' + request.resource.data.reportingPeriod + '_NIL' &&
+            request.resource.data.limit == 'NIL' ||
+         recordId == myId() + '_' + request.resource.data.reportingPeriod + '_' +
+            request.resource.data.normalizedAccountNo && accountFormat() &&
+            request.resource.data.limit != 'NIL' &&
+            hasAtomicScoreFor(recordId)));
+      // Officers cannot edit or delete submitted reports. ADMIN may edit
+      // applicant/amount only, or soft-delete with an audited score update.
+      allow update: if admin() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+          ['applicantName','limit','status','managerId','salesManager']);
+      allow delete: if admin() ||
+        (ownEmployee(resource.data.employeeId) && myRole() == 'USER' &&
+          resource.data.limit == 'NIL' && nilReplacedAtomically());
+
+    }
+
+    match /targets/{targetId} {
+      allow read: if approved();
+      allow create, update: if admin() &&
+        request.resource.data.employeeId is string &&
+        request.resource.data.reportingPeriod.matches('^[0-9]{4}-(0[1-9]|1[0-2])$') &&
+        targetId == request.resource.data.employeeId + '_' +
+          request.resource.data.reportingPeriod &&
+        request.resource.data.targetCards is int &&
+        request.resource.data.targetCards >= 0 &&
+        request.resource.data.yearlyTargetCards is int &&
+        request.resource.data.yearlyTargetCards >= 0;
+      allow delete: if admin();
+    }
+
+    match /role_change_logs/{eventId} {
+      allow get, list: if admin();
+      // Required audit record for administrator role changes. The stored
+      // before/after roles must agree with the employee change in the batch.
+      allow create: if admin() &&
+        request.resource.data.keys().hasOnly([
+          'actorUid','targetEmployeeId','oldRole','newRole','createdAt']) &&
+        request.resource.data.actorUid == request.auth.uid &&
+        request.resource.data.createdAt == request.time &&
+        validId(request.resource.data.targetEmployeeId) &&
+        request.resource.data.targetEmployeeId != myId() &&
+        request.resource.data.oldRole in ['USER','Sales Manager','AGM','DGM','ADMIN'] &&
+        request.resource.data.newRole in ['USER','Sales Manager','AGM','DGM','ADMIN'] &&
+        get(/databases/$(database)/documents/employees/$(request.resource.data.targetEmployeeId)).data.role ==
+          request.resource.data.oldRole &&
+        getAfter(/databases/$(database)/documents/employees/$(request.resource.data.targetEmployeeId)).data.role ==
+          request.resource.data.newRole;
+      allow update, delete: if false;
+    }
+
+    // Two-stage account deletion: admin can revoke access from the app,
+    // but Auth user deletion is performed only by the trusted Admin SDK.
+    match /account_deletion_requests/{employeeId} {
+      allow read: if admin();
+      allow create: if admin() && validId(employeeId) && employeeId != myId() &&
+        request.resource.data.keys().hasOnly([
+          'employeeId','authUid','requestedBy','status','createdAt']) &&
+        request.resource.data.employeeId == employeeId &&
+        request.resource.data.authUid is string &&
+        request.resource.data.authUid ==
+          get(/databases/$(database)/documents/employees/$(employeeId)).data.authUid &&
+        request.resource.data.requestedBy == request.auth.uid &&
+        request.resource.data.status == 'Pending' &&
+        request.resource.data.createdAt == request.time &&
+        getAfter(/databases/$(database)/documents/employees/$(employeeId)).data.status == 'Disabled' &&
+        getAfter(/databases/$(database)/documents/auth_users/$(request.resource.data.authUid)).data.status == 'Disabled';
+      allow update, delete: if false;
+    }
+
+    match /user_notifications/{employeeId}/messages/{messageId} {
+      allow get, list: if admin() || ownEmployee(employeeId);
+      allow create: if admin() && validId(employeeId) &&
+        request.resource.data.keys().hasOnly([
+          'title','body','period','kind','createdAt','sentBy']) &&
+        request.resource.data.title == 'Monthly report reminder' &&
+        request.resource.data.kind == 'NOT_SUBMITTED' &&
+        request.resource.data.period.matches('^[0-9]{4}-(0[1-9]|1[0-2])$') &&
+        request.resource.data.title is string &&
+        request.resource.data.body is string &&
+        request.resource.data.createdAt == request.time &&
+        request.resource.data.sentBy == request.auth.uid &&
+        get(/databases/$(database)/documents/employees/$(employeeId)).data.role == 'USER';
+      allow update, delete: if false;
+    }
+
+    match /export_logs/{eventId} {
+      allow create: if approved() && request.resource.data.actorUid == request.auth.uid &&
+        request.resource.data.keys().hasOnly(['actorUid','type','createdAt']) &&
+        request.resource.data.createdAt == request.time;
+      allow get, list: if admin();
+      allow update, delete: if false;
+    }
+
+    match /leaderboard/{empId} {
+      // No applicant names or account numbers live in this collection.
+      allow read: if approved();
+      // Admin may perform audited historical repair / migrations.
+      allow create: if admin() ||
+        (ownEmployee(empId) && myRole() == 'USER' &&
+          request.resource.data.keys().hasOnly(
+            ['employeeId','cards','lastProofId','updatedAt']) &&
+          request.resource.data.employeeId == myId() &&
+          request.resource.data.cards == 1 &&
+          request.resource.data.updatedAt == request.time &&
+          correctNewScore());
+      allow update: if admin() ||
+        (ownEmployee(empId) && myRole() == 'USER' &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+            ['cards','lastProofId','updatedAt']) &&
+          request.resource.data.employeeId == resource.data.employeeId &&
+          request.resource.data.employeeId == myId() &&
+          request.resource.data.cards is int &&
+          request.resource.data.cards == resource.data.cards + 1 &&
+          request.resource.data.updatedAt == request.time &&
+          correctNewScore());
+      allow delete: if admin();
+    }
+
+    match /{other=**} { allow read, write: if false; }
+  }
+}
