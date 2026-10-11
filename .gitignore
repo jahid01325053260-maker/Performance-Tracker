@@ -1,0 +1,21 @@
+.dart_tool/
+.flutter-plugins*
+.packages
+build/
+.idea/
+.vscode/
+android/.gradle/
+**/node_modules/
+backend/.env
+.env
+*.jks
+*.keystore
+**/service-account*.json
+**/google-services.json
+**/GoogleService-Info.plist
+# Preserve this user-supplied Android Firebase *client* configuration for GitHub builds.
+# Firebase API keys in google-services.json are public identifiers, not Admin credentials.
+!firebase_config/android/google-services.json
+
+# Local Windows FlutterFire client build configuration
+firebase_config/windows/firebase_options.local.json
