@@ -105,8 +105,10 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       if (changed) await deliveredAlertStore.write(uid, delivered);
     }).listen((_) {}, onError: (Object error) {
-      if (mounted) showMessage(context,
-        'Could not load reminders. Open Notifications to view the error.');
+      if (mounted) {
+        showMessage(context,
+          'Could not load reminders. Open Notifications to view the error.');
+      }
     });
   }
 
@@ -313,10 +315,12 @@ class _PeriodScopedScreenState extends State<_PeriodScopedScreen> {
       setState(() => sendingAlerts = true);
       // Re-check immediately before publishing to avoid notifying recent submitters.
       final sent = await widget.session.api.alertNotSubmitted(period);
-      if (mounted) showMessage(context, sent == 0
-          ? 'No eligible officers need a reminder for this period.'
-          : '$sent reminder(s) delivered to employee inboxes. '
-              'Phone banners appear when the user opens the Android app and permits notifications.');
+      if (mounted) {
+        showMessage(context, sent == 0
+            ? 'No eligible officers need a reminder for this period.'
+            : '$sent reminder(s) delivered to employee inboxes. '
+                'Phone banners appear when the user opens the Android app and permits notifications.');
+      }
     } catch (error) {
       if (mounted) showMessage(context, 'Could not send alerts: $error');
     } finally {
