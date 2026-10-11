@@ -1,36 +1,55 @@
-# PerformanceTracker — Windows Firebase Configuration
+# Performance Tracker — Windows GitHub Actions সেটআপ (আপডেট)
 
-## Local Windows build
+## আপনার ত্রুটির কারণ
 
-Firebase Console > Project settings > Your apps > Web app > Config থেকে প্রকৃত Web App configuration নিন।
-`firebase_config/windows/firebase_options.example.json` কপি করে একই ফোল্ডারে
-`firebase_options.local.json` নাম দিন, এবং পাঁচটি `FIREBASE_*` মান বসান।
+আগের `.github/workflows/desktop.yml` শুধু `WINDOWS_FIREBASE_OPTIONS_JSON` Secret পড়ত। আপনার পাঁচটি `PT_*` Variable থাকলেও সেটি `Missing WINDOWS_FIREBASE_OPTIONS_JSON` দেখাত। নতুন workflow দুটো পদ্ধতির **যেকোনো একটি** গ্রহণ করে।
 
-```powershell
-flutter pub get
-flutter run -d windows --dart-define-from-file=firebase_config/windows/firebase_options.local.json
-flutter build windows --release --dart-define-from-file=firebase_config/windows/firebase_options.local.json
-```
+## পদ্ধতি A: পাঁচটি PT_* GitHub Variables (সহজ)
 
-শুধু `.exe`-র পাশে ফাইল রাখলে কাজ করবে না—Firebase values build time-এ যুক্ত হয়।
+Repository → **Settings → Secrets and variables → Actions → Variables → New repository variable** থেকে আলাদাভাবে তৈরি করুন:
 
-## GitHub Actions Windows release
+- `PT_API_KEY` — Web App-এর পূর্ণ apiKey
+- `PT_APP_ID` — Web App-এর appId (`1:...:web:...`)
+- `PT_MESSAGING_SENDER_ID` — Web App-এর messagingSenderId
+- `PT_PROJECT_ID` — `performance-tracker-66b42`
+- `PT_AUTH_DOMAIN` — `performance-tracker-66b42.firebaseapp.com`
 
-1. Repository > Settings > Secrets and variables > Actions > New repository secret.
-2. Name: `WINDOWS_FIREBASE_OPTIONS_JSON`
-3. Value: নিচের JSON-এ প্রকৃত Firebase WEB app values বসিয়ে সম্পূর্ণ JSON পেস্ট করুন:
+একটি JSON বা `KEY: value` ব্লক একসঙ্গে পেস্ট করবেন **না**। প্রতিটি Name-এর Value ঘরে শুধু মান বসান। `Secrets` ট্যাবে আলাদাভাবে রাখলেও নতুন Workflow কাজ করবে।
+
+## পদ্ধতি B: একটি JSON Secret
+
+Repository → **Settings → Secrets and variables → Actions → Secrets → New repository secret**:
+
+- Name: `WINDOWS_FIREBASE_OPTIONS_JSON`
+- Value: বৈধ JSON, এই নমুনার মতো (আপনার প্রকৃত Firebase Web App মান বসান):
 
 ```json
 {
   "FIREBASE_API_KEY": "YOUR_WEB_API_KEY",
-  "FIREBASE_APP_ID": "YOUR_WEB_APP_ID",
-  "FIREBASE_MESSAGING_SENDER_ID": "YOUR_WEB_SENDER_ID",
+  "FIREBASE_APP_ID": "1:YOUR_SENDER_ID:web:YOUR_WEB_APP_ID",
+  "FIREBASE_MESSAGING_SENDER_ID": "YOUR_SENDER_ID",
   "FIREBASE_PROJECT_ID": "performance-tracker-66b42",
   "FIREBASE_AUTH_DOMAIN": "performance-tracker-66b42.firebaseapp.com"
 }
 ```
 
-4. `.github/workflows/desktop.yml` Replace করে Commit করুন।
-5. Actions > Desktop Builds > Run workflow; Build হলে নতুন Windows artifact ডাউনলোড করুন।
+`WINDOWS_FIREBASE_OPTIONS_JSON` Secret দিলে সেটি `PT_*` মানগুলোর আগে ব্যবহার হবে। Secret-এ ভুল/পুরোনো JSON থাকলে সেটি ঠিক করুন অথবা মুছে কেবল `PT_*` ব্যবহার করুন।
 
-**নোট:** Windows-এ Firebase Authentication ও Cloud Firestore FlutterFire-এ beta / local development; production ব্যবহারের জন্য আনুষ্ঠানিক সমর্থন নেই। Firebase service-account/private key কখনও এই JSON-এ রাখবেন না।
+## চালানোর নিয়ম
+
+1. `.github/workflows/desktop.yml` এবং `lib/main.dart` পরিবর্তিত ফাইল Replace করুন।
+2. GitHub-এ Commit করুন।
+3. Actions → **Desktop Builds** → **Run workflow**।
+4. Windows job সফল হলে Artifacts থেকে `PerformanceTracker-windows` ডাউনলোড করুন। `exe`-এর পাশাপাশি DLL ও data ফোল্ডারও রাখতে হবে।
+
+## কেন main.dart পরিবর্তন করা হয়েছে
+
+Windows-এ Android-এর `google-services.json` থাকে না। `flutter build windows --release --dart-define-from-file=firebase_config/windows/firebase_options.local.json` থেকে পাওয়া পাঁচটি মান দিয়ে এখন Windows-এর `Firebase.initializeApp(options: ...)` করা হবে। Android-এর নিজের initialization অপরিবর্তিত।
+
+## বিশেষ সতর্কতা
+
+- এই JSON সাধারণ ক্লায়েন্ট Web App config, **Admin service-account/private key নয়**।
+- `firebase_config/windows/firebase_options.local.json` `.gitignore`-এ আছে; স্থানীয় ফাইলটি GitHub-এ Commit করা দরকার নেই।
+- Github Environment-level Secret/Variable ব্যবহার করলে সংশ্লিষ্ট Job-এ `environment:` সেট থাকতে হয়; সহজ উপায় হলো Repository-level Variables/Secrets।
+- Windows Firebase Auth/Firestore-এর beta plugin compatibility ও বাস্তব Login/Reporting আলাদা করে পরীক্ষা করতে হবে।
+- Windows, Linux ও macOS jobs এক Workflow-তে থাকলেও এই পরিবর্তন কেবল Windows setup-এর জন্য।
