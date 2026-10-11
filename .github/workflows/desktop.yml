@@ -1,0 +1,137 @@
+name: Desktop Builds
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux
+          - os: windows-latest
+            target: windows
+          - os: macos-latest
+            target: macos
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Required for Flutter Linux and flutter_secure_storage_linux.
+      - name: Install Linux desktop dependencies
+        if: matrix.target == 'linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev libsecret-1-dev libsecret-1-0
+          pkg-config --modversion gtk+-3.0
+          pkg-config --modversion libsecret-1
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate platform runner
+        run: flutter create --project-name performance_tracker_flutter --org com.performance --platforms=${{ matrix.target }} .
+
+      - name: Resolve Flutter packages
+        run: flutter pub get
+
+      # firebase_core 4.15.0 expects Firebase C++ SDK 13.12.0. Its default
+      # CMake download uses dl.google.com and may fail on a transient HTTP/2
+      # interruption. Download with HTTP/1.1 and retries before CMake starts.
+      # Do not commit the downloaded SDK or a Firebase service-account key.
+      - name: Download Firebase C++ SDK for Windows (with retries)
+        if: matrix.target == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $version = '13.12.0'
+          $url = "https://dl.google.com/firebase/sdk/cpp/firebase_cpp_sdk_windows_$version.zip"
+          $archive = Join-Path $env:RUNNER_TEMP "firebase_cpp_sdk_windows_$version.zip"
+          $sdkRoot = Join-Path $env:RUNNER_TEMP 'firebase_cpp_sdk_preinstalled'
+          New-Item -ItemType Directory -Force -Path $sdkRoot | Out-Null
+
+          $downloaded = $false
+          for ($attempt = 1; $attempt -le 4; $attempt++) {
+            Write-Host "Firebase C++ SDK download attempt $attempt/4"
+            if (Test-Path $archive) { Remove-Item $archive -Force }
+            & curl.exe --http1.1 --fail --location --retry 3 --retry-all-errors --retry-delay 5 --connect-timeout 30 --max-time 1200 --output $archive $url
+            if ($LASTEXITCODE -eq 0 -and (Test-Path $archive) -and (Get-Item $archive).Length -gt 1048576) {
+              $downloaded = $true
+              break
+            }
+            Write-Warning "Download failed or was incomplete; retrying..."
+            Start-Sleep -Seconds (5 * $attempt)
+          }
+          if (-not $downloaded) { throw 'Firebase C++ SDK download failed after retries. Check connectivity to dl.google.com.' }
+
+          & tar.exe -xf $archive -C $sdkRoot
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to extract the Firebase C++ SDK archive.' }
+          $sdkDir = Join-Path $sdkRoot 'firebase_cpp_sdk_windows'
+          $versionHeader = Join-Path $sdkDir 'include/firebase/version.h'
+          if (-not (Test-Path $versionHeader)) { throw "SDK version header was not found: $versionHeader" }
+          $header = Get-Content -Raw $versionHeader
+          if ($header -notmatch 'FIREBASE_VERSION_MAJOR\s+13\b' -or
+              $header -notmatch 'FIREBASE_VERSION_MINOR\s+12\b' -or
+              $header -notmatch 'FIREBASE_VERSION_REVISION\s+0\b') {
+            throw 'Extracted Firebase SDK version is not 13.12.0.'
+          }
+          "FIREBASE_CPP_SDK_DIR=$sdkDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Firebase C++ SDK prepared at: $sdkDir"
+
+      # Windows reads Firebase client app options at compile time via
+      # --dart-define-from-file. Keep them in Actions Secrets instead of
+      # committing the local config. This is NOT a Firebase Admin credential.
+      - name: Write Windows Firebase build options
+        if: matrix.target == 'windows'
+        shell: pwsh
+        env:
+          WINDOWS_FIREBASE_OPTIONS_JSON: ${{ secrets.WINDOWS_FIREBASE_OPTIONS_JSON }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_FIREBASE_OPTIONS_JSON)) {
+            throw 'Missing WINDOWS_FIREBASE_OPTIONS_JSON secret. Add the Firebase WEB app settings in Repository Settings > Secrets and variables > Actions.'
+          }
+          $cfg = $env:WINDOWS_FIREBASE_OPTIONS_JSON | ConvertFrom-Json
+          $required = @('FIREBASE_API_KEY', 'FIREBASE_APP_ID', 'FIREBASE_MESSAGING_SENDER_ID', 'FIREBASE_PROJECT_ID', 'FIREBASE_AUTH_DOMAIN')
+          foreach ($key in $required) {
+            $value = [string]$cfg.$key
+            if ([string]::IsNullOrWhiteSpace($value) -or $value.Contains('REPLACE_') -or $value.Contains('YOUR_')) {
+              throw "Invalid/missing Firebase options key: $key"
+            }
+          }
+          if ($cfg.FIREBASE_PROJECT_ID -ne 'performance-tracker-66b42') {
+            throw 'Firebase project mismatch. Expected performance-tracker-66b42.'
+          }
+          $dest = Join-Path $env:GITHUB_WORKSPACE 'firebase_config/windows/firebase_options.local.json'
+          New-Item -ItemType Directory -Force -Path (Split-Path $dest -Parent) | Out-Null
+          [System.IO.File]::WriteAllText($dest, $env:WINDOWS_FIREBASE_OPTIONS_JSON, [System.Text.UTF8Encoding]::new($false))
+          Write-Host 'Windows Firebase build options validated and prepared.'
+
+      - name: Build release Windows application with Firebase
+        if: matrix.target == 'windows'
+        shell: pwsh
+        run: flutter build windows --release --dart-define-from-file=firebase_config/windows/firebase_options.local.json
+
+      - name: Build release Linux or macOS application
+        if: matrix.target != 'windows'
+        run: flutter build ${{ matrix.target }} --release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PerformanceTracker-${{ matrix.target }}
+          path: |
+            build/windows/x64/runner/Release/**
+            build/linux/x64/release/bundle/**
+            build/macos/Build/Products/Release/*.app/**
+          if-no-files-found: error

@@ -1,0 +1,23 @@
+name: iOS Unsigned Compile
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+jobs:
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter create --project-name performance_tracker_flutter --org com.performance --platforms=ios .
+      - run: flutter pub get
+      - name: Build unsigned iOS device bundle (NOT installable IPA)
+        run: flutter build ios --release --no-codesign
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PerformanceTracker-iOS-Unsigned
+          path: build/ios/iphoneos/Runner.app/**
+          if-no-files-found: error
