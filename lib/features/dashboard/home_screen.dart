@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/report_years.dart';
 import '../../core/submission_deadline.dart';
 import 'package:flutter/services.dart';
@@ -33,8 +34,7 @@ class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription<Map<String, int>>? rankingListener;
   StreamSubscription? profileListener;
   StreamSubscription? notificationListener;
-  Set<String> receivedNotifications = {};
-  bool notificationInitialSnapshot = true;
+  final DeliveredAlertStore deliveredAlertStore = DeliveredAlertStore();
   Timer? refreshTimer;
   void scheduleReload() {
     refreshTimer?.cancel();
@@ -61,23 +61,53 @@ class _HomeScreenState extends State<HomeScreen> {
   }
   Future<void> _listenForAlerts() async {
     if (!widget.session.api.isConfigured) return;
+    final uid = widget.session.api.auth.currentUser?.uid ?? '';
+    if (uid.isEmpty) return;
+    // On Android 13+ this requests permission before processing existing
+    // reminders. Inbox delivery itself does NOT depend on OS permission.
     await DeviceAlerts.requestPermission();
+    final delivered = await deliveredAlertStore.read(uid);
     if (!mounted) return;
-    notificationListener = widget.session.api.watchOwnAlerts().listen((messages) {
-      final allIds = messages.map((m) => '${m['id']}').toSet();
-      if (notificationInitialSnapshot) {
-        receivedNotifications = allIds;
-        notificationInitialSnapshot = false;
-        return;
-      }
+    var firstSnapshot = true;
+    notificationListener = widget.session.api.watchOwnAlerts()
+        .asyncMap((messages) async {
+      if (!mounted) return;
+      final isInitial = firstSnapshot;
+      firstSnapshot = false;
+      final expiry = DateTime.now().subtract(const Duration(days: 30));
+      var shownOnInitial = 0;
+      var changed = false;
+      // Messages are returned newest first. On first launch, surface recent
+      // reminders missed while the app was closed (up to three banners).
       for (final message in messages) {
-        if (!receivedNotifications.contains('${message['id']}')) {
-          DeviceAlerts.notify('${message['title'] ?? 'Performance Tracker'}',
-              '${message['body'] ?? ''}');
+        final id = '${message['id'] ?? ''}';
+        if (id.isEmpty || delivered.contains(id)) continue;
+        final createdAt = message['createdAt'];
+        if (createdAt is Timestamp && createdAt.toDate().isBefore(expiry)) {
+          delivered.add(id);
+          changed = true;
+          continue;
+        }
+        if (isInitial && shownOnInitial >= 3) continue;
+        final displayed = await DeviceAlerts.notify(
+          '${message['title'] ?? 'Performance Tracker'}',
+          '${message['body'] ?? ''}');
+        if (displayed) {
+          delivered.add(id);
+          changed = true;
+          if (isInitial) shownOnInitial++;
+        } else if (mounted && defaultTargetPlatform == TargetPlatform.android) {
+          // Notifications are disabled, but the user still has an in-app inbox.
+          showMessage(context, 'New report reminder. Open Notifications to read it. '
+            'Enable notification permission for phone alerts.');
+          break;
         }
       }
-      receivedNotifications = allIds;
-    }, onError: (_) {});
+      if (changed) await deliveredAlertStore.write(uid, delivered);
+    }).listen((_) {}, onError: (Object error) {
+      if (mounted) showMessage(context,
+        'Could not load reminders. Open Notifications to view the error.');
+    });
   }
 
   void reload(){summary=Future.wait<Object>([widget.session.api.records(),widget.session.api.employees()]);}
@@ -106,7 +136,9 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => sendingQuickAlert = true);
     try {
       final count = await widget.session.api.alertNotSubmitted(period);
-      if (mounted) { showMessage(context, '$count reminder(s) added to employee inboxes.'); }
+      if (mounted) { showMessage(context, count == 0
+          ? 'No eligible officers need a reminder for this period.'
+          : '$count reminder(s) added to employee inboxes.'); }
     } catch (e) {
       if (mounted) { showMessage(context, 'Unable to send reminders: $e'); }
     } finally {
@@ -235,9 +267,18 @@ class _PeriodScopedScreen extends StatefulWidget {
   @override State<_PeriodScopedScreen> createState()=>_PeriodScopedScreenState();
 }
 class _PeriodScopedScreenState extends State<_PeriodScopedScreen> {
-  int year=DateTime.now().year; int month=DateTime.now().month;
+  late int year;
+  late int month;
   late Future<List<Object>> future;
-  @override void initState(){super.initState();load();}
+  @override void initState() {
+    super.initState();
+    final today = DateTime.now();
+    final latestDue = DateTime(today.year,
+        today.month - (today.day >= 10 ? 1 : 2), 1);
+    year = widget.isTrend ? today.year : latestDue.year;
+    month = widget.isTrend ? today.month : latestDue.month;
+    load();
+  }
   void load() {
     future = Future.wait<Object>([
       widget.session.api.employees(),
@@ -272,7 +313,10 @@ class _PeriodScopedScreenState extends State<_PeriodScopedScreen> {
       setState(() => sendingAlerts = true);
       // Re-check immediately before publishing to avoid notifying recent submitters.
       final sent = await widget.session.api.alertNotSubmitted(period);
-      if (mounted) showMessage(context, '$sent alert(s) saved to employee inboxes.');
+      if (mounted) showMessage(context, sent == 0
+          ? 'No eligible officers need a reminder for this period.'
+          : '$sent reminder(s) delivered to employee inboxes. '
+              'Phone banners appear when the user opens the Android app and permits notifications.');
     } catch (error) {
       if (mounted) showMessage(context, 'Could not send alerts: $error');
     } finally {

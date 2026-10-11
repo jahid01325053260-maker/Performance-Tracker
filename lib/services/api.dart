@@ -921,17 +921,16 @@ class ApiClient {
         data['status'] != 'deleted' && data['status'] != 'rejected';
     }).map((d) => '${d.data()['employeeId']}').toSet();
     final missing = eligible.where((d) => !submitted.contains(d.id)).toList();
+    // Each administrator-confirmed send produces a fresh message. Reusing one
+    // document per period made later Alert taps appear successful but delivered
+    // nothing new to a device that had already seen the first snapshot.
     var sent = 0;
     for (var offset = 0; offset < missing.length; offset += 400) {
+      final chunk = missing.skip(offset).take(400).toList();
       final batch = db.batch();
-      for (final employee in missing.skip(offset).take(400)) {
-        // One reminder per officer per reporting period: avoid repeated alerts
-        // and unexpected write costs when an admin taps Alert more than once.
+      for (final employee in chunk) {
         final doc = db.collection('user_notifications').doc(employee.id)
-            .collection('messages').doc('missing_$p');
-        if ((await doc.get(const GetOptions(source: Source.server))).exists) {
-          continue;
-        }
+            .collection('messages').doc();
         batch.set(doc, {
           'title': 'Monthly report reminder',
           'body': 'Your $p performance report has not been submitted. Please submit your report.',
@@ -939,9 +938,10 @@ class ApiClient {
           'createdAt': FieldValue.serverTimestamp(),
           'sentBy': auth.currentUser!.uid,
         });
-        sent++;
       }
+      // Count only confirmed committed messages, not attempted writes.
       await batch.commit();
+      sent += chunk.length;
     }
     return sent;
   }

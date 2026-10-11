@@ -30,9 +30,20 @@ class NotificationsScreen extends StatelessWidget {
         final alerts = snapshot.data!;
         if (alerts.isEmpty) return const Center(child: Text('No alerts yet.'));
         return ListView.separated(padding: const EdgeInsets.all(12),
-          itemCount: alerts.length, separatorBuilder: (_, _) => const Divider(),
+          itemCount: alerts.length + 1,
+          separatorBuilder: (_, _) => const Divider(height: 4),
           itemBuilder: (context, index) {
-            final alert = alerts[index];
+            if (index == 0) {
+              return const Padding(
+                padding: EdgeInsets.only(bottom: 8),
+                child: Text('Reminders are kept here even when the app is closed. '
+                  'Android phone alerts appear while using the app or on the '
+                  'next launch when notification permission is enabled. '
+                  'Closed-app instant push is not currently supported.',
+                  style: TextStyle(color: Palette.muted)),
+              );
+            }
+            final alert = alerts[index - 1];
             return Card(child: ListTile(
               leading: const Icon(Icons.notifications_outlined, color: Palette.primary),
               title: Text('${alert['title'] ?? 'Report alert'}'),

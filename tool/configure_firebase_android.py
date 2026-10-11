@@ -99,6 +99,20 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+    private var pendingPermissionResult: MethodChannel.Result? = null
+    private val notificationPermissionRequestCode = 5010
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == notificationPermissionRequestCode) {
+            val granted = grantResults.isNotEmpty() &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED
+            pendingPermissionResult?.success(granted)
+            pendingPermissionResult = null
+        }
+    }
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger,
@@ -108,8 +122,13 @@ class MainActivity : FlutterActivity() {
                     if (Build.VERSION.SDK_INT >= 33 &&
                         checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
                         PackageManager.PERMISSION_GRANTED) {
-                        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 5010)
-                        result.success(false)
+                        if (pendingPermissionResult != null) {
+                            result.success(false)
+                        } else {
+                            pendingPermissionResult = result
+                            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                                notificationPermissionRequestCode)
+                        }
                     } else {
                         result.success(true)
                     }
@@ -119,13 +138,13 @@ class MainActivity : FlutterActivity() {
                         if (Build.VERSION.SDK_INT >= 33 &&
                             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
                             PackageManager.PERMISSION_GRANTED) {
-                            result.success(null)
+                            result.success(false)
                         } else {
                             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                            val channelId = "performance_reminders"
+                            val channelId = "performance_reminders_v2"
                             if (Build.VERSION.SDK_INT >= 26) {
                                 manager.createNotificationChannel(NotificationChannel(
-                                    channelId, "Performance reminders", NotificationManager.IMPORTANCE_DEFAULT))
+                                    channelId, "Performance reminders", NotificationManager.IMPORTANCE_HIGH))
                             }
                             val builder = if (Build.VERSION.SDK_INT >= 26)
                                 Notification.Builder(this, channelId) else Notification.Builder(this)
@@ -134,9 +153,11 @@ class MainActivity : FlutterActivity() {
                                 .setContentTitle(call.argument<String>("title") ?: "Performance Tracker")
                                 .setContentText(call.argument<String>("body") ?: "")
                                 .setAutoCancel(true)
+                                .setPriority(Notification.PRIORITY_HIGH)
+                                .setVisibility(Notification.VISIBILITY_PRIVATE)
                                 .build()
                             manager.notify((System.currentTimeMillis() % 1000000L).toInt(), notification)
-                            result.success(null)
+                            result.success(true)
                         }
                     } catch (e: Exception) {
                         result.error("NOTIFICATION_ERROR", e.message, null)
