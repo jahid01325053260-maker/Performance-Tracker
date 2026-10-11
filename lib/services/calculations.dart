@@ -26,6 +26,7 @@ class Achievement {
   const Achievement(this.achieved, this.target);
   double? get percentage => target <= 0 ? null : achieved * 100 / target;
   bool get below50 => target > 0 && achieved * 2 < target;
+  bool get atOrBelow50 => target > 0 && achieved * 2 <= target;
   int get needsFor50 => below50 ? max(0, (target / 2).ceil() - achieved) : 0;
   int get shortfall => max(0, target-achieved);
   String get label => percentage == null ? 'No Target Assigned' : '${percentage!.toStringAsFixed(1)}%';
@@ -52,3 +53,12 @@ bool belongsToManager(Employee officer, Employee manager) =>
       (officer.managerId.isNotEmpty && officer.managerId == manager.employeeId) ||
       (officer.managerId.isEmpty && officer.salesManager.trim().toLowerCase() ==
         manager.name.trim().toLowerCase()));
+
+/// True only for a valid numeric achievement percentage at or below 50%.
+/// "No Target Assigned" is never styled as a low achievement.
+bool isLowAchievementLabel(String value) {
+  final label = value.trim();
+  if (!label.endsWith('%')) return false;
+  final percentage = double.tryParse(label.substring(0, label.length - 1).trim());
+  return percentage != null && percentage >= 0 && percentage <= 50;
+}

@@ -545,9 +545,20 @@ class ApiClient {
           final before = await t.get(accountRef);
           final score = await t.get(scoreRef);
           final oldNil = await t.get(docNil);
-          if (before.exists) { return; } // Same period + same account => no duplicate.
+          // An approved ADMIN soft-delete leaves the document in Firestore.
+          // A repeat PDF upload must restore that account, not silently skip it.
+          // Confirmed records remain immutable and duplicate-safe.
+          if (before.exists && before.data()?['status'] != 'deleted') {
+            return;
+          }
           final count = asInt(score.data()?['cards']);
-          t.set(accountRef, entry.value);
+          if (before.exists) {
+            // Restore the same verified officer/month/account. Keep the old
+            // document fields for audit; no new ID or duplicate is created.
+            t.update(accountRef, {'status': 'confirmed'});
+          } else {
+            t.set(accountRef, entry.value);
+          }
           t.set(proofRef, {'employeeId': employee.employeeId, 'recordId': entry.key});
           if (oldNil.exists) { t.delete(docNil); }
           t.set(scoreRef, {

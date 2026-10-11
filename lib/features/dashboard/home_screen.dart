@@ -34,6 +34,10 @@ class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription<Map<String, int>>? rankingListener;
   StreamSubscription? profileListener;
   StreamSubscription? notificationListener;
+  StreamSubscription? approvalChanges;
+  StreamSubscription? managerRequestChanges;
+  bool hasPendingApprovals = false;
+  bool hasPendingManagerRequests = false;
   final DeliveredAlertStore deliveredAlertStore = DeliveredAlertStore();
   Timer? refreshTimer;
   void scheduleReload() {
@@ -45,6 +49,16 @@ class _HomeScreenState extends State<HomeScreen> {
   @override void initState(){
     super.initState();reload();
     _listenForAlerts();
+    if (widget.session.user?.isAdmin == true) {
+      approvalChanges = widget.session.api.db.collection('employees')
+          .where('status', isEqualTo: 'Pending').snapshots().listen((snapshot) {
+        if (mounted) setState(() => hasPendingApprovals = snapshot.docs.isNotEmpty);
+      }, onError: (_) {});
+      managerRequestChanges = widget.session.api.db.collection('manager_change_requests')
+          .where('status', isEqualTo: 'Pending').snapshots().listen((snapshot) {
+        if (mounted) setState(() => hasPendingManagerRequests = snapshot.docs.isNotEmpty);
+      }, onError: (_) {});
+    }
     rankingListener=widget.session.api.watchRankingCounts()
       .listen((_) => scheduleReload(), onError: (_) {});
     profileListener=widget.session.api.db.collection('employees')
@@ -57,6 +71,8 @@ class _HomeScreenState extends State<HomeScreen> {
   @override void dispose(){
     refreshTimer?.cancel();rankingListener?.cancel();profileListener?.cancel();
     notificationListener?.cancel();
+    approvalChanges?.cancel();
+    managerRequestChanges?.cancel();
     super.dispose();
   }
   Future<void> _listenForAlerts() async {
@@ -193,6 +209,10 @@ class _HomeScreenState extends State<HomeScreen> {
       if(adminStyle)(title:'Officer List',icon:Icons.groups_outlined,page:()=>DirectoryScreen(session:widget.session)),
       if(adminStyle)(title:'Manager Team',icon:Icons.supervisor_account_outlined,page:()=>ManagerTeamScreen(session:widget.session)),
       if(adminStyle)(title:'Targets',icon:Icons.flag_outlined,page:()=>TargetsScreen(session:widget.session)),
+      if(me.isAdmin)(title:'Pending Approvals',icon:Icons.checklist_outlined,
+        page:()=>ApprovalsScreen(session:widget.session)),
+      if(me.isAdmin)(title:'Sales Manager Change Requests',icon:Icons.manage_accounts_outlined,
+        page:()=>ManagerChangeRequestsScreen(session:widget.session)),
       (title:'Notifications',icon:Icons.notifications_outlined,page:()=>NotificationsScreen(session:widget.session)),
       (title:'Settings',icon:Icons.settings_outlined,page:()=>SettingsScreen(session:widget.session)),
     ];
@@ -203,7 +223,11 @@ class _HomeScreenState extends State<HomeScreen> {
         if (!didPop) confirmExit();
       },
       child: Scaffold(appBar:AppBar(title:Text(adminStyle?(me.isAdmin?'Control Panel (ADMIN)':'Manager Dashboard'):'Performance Tracker'),
-      actions:[IconButton(tooltip:'Refresh',onPressed:()=>setState(reload),icon:const Icon(Icons.refresh)), IconButton(tooltip:'Profile / settings',onPressed:()=>visit(SettingsScreen(session:widget.session)),icon:const Icon(Icons.settings_outlined))]),
+      actions:[IconButton(tooltip:'Refresh',onPressed:()=>setState(reload),icon:const Icon(Icons.refresh)), IconButton(tooltip:'Profile / settings',onPressed:()=>visit(SettingsScreen(session:widget.session)),icon:Stack(clipBehavior: Clip.none, children: [
+        const Icon(Icons.settings_outlined),
+        if (me.isAdmin && (hasPendingApprovals || hasPendingManagerRequests))
+          const Positioned(right:-4, top:-3, child: _PendingDot()),
+      ]))]),
       body:RefreshIndicator(onRefresh:()async{setState(reload);await summary;},child:ListView(padding:const EdgeInsets.all(16),children:[
         Center(child:ConstrainedBox(constraints:const BoxConstraints(maxWidth:1100),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
           Text('Welcome, ${me.name}',style:Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight:FontWeight.bold,color:Palette.dark)),
@@ -224,7 +248,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 _StatCard(title:'Total Cards (All Time)',value:'${countCards(records, employeeId:me.employeeId)}',icon:Icons.assessment_outlined)],
               const SizedBox(height:10),if(!adminStyle) SectionCard(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
                 Text('TARGET ACHIEVEMENT • ${readablePeriod(period)}',style:const TextStyle(fontWeight:FontWeight.bold)),const SizedBox(height:8),
-                Text(achievement.label,style:const TextStyle(fontSize:26,fontWeight:FontWeight.bold,color:Palette.primary)),const SizedBox(height:8),
+                Text(achievement.label,style:TextStyle(fontSize:26,fontWeight:FontWeight.bold,
+                  color: achievement.atOrBelow50 ? Palette.red : Palette.primary)),const SizedBox(height:8),
                 LinearProgressIndicator(value:achievement.progress,minHeight:9,borderRadius:BorderRadius.circular(12)),
                 if(achievement.below50)Padding(padding:const EdgeInsets.only(top:8),child:Text('Below 50% • ${achievement.needsFor50} card(s) needed to reach 50%',style:const TextStyle(color:Palette.red))),
               ])),
@@ -233,7 +258,12 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height:16),Text(adminStyle?'MAIN ACTIONS':'QUICK ACTIONS',style:const TextStyle(fontWeight:FontWeight.bold,color:Palette.dark)),const SizedBox(height:10),
           GridView.builder(shrinkWrap:true,physics:const NeverScrollableScrollPhysics(),itemCount:actions.length,
             gridDelegate:SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount:width>=970?4:width>=540?3:2,mainAxisSpacing:10,crossAxisSpacing:10,childAspectRatio:width>=540?2.2:1.6),
-            itemBuilder:(context,i){final a=actions[i];return Card(clipBehavior:Clip.antiAlias,child:InkWell(onTap:()=>visit(a.page()),child:Padding(padding:const EdgeInsets.all(12),child:Column(mainAxisAlignment:MainAxisAlignment.center,children:[Icon(a.icon,color:Palette.primary,size:30),const SizedBox(height:10),if(a.title == 'Not Submitted' && me.isAdmin)
+            itemBuilder:(context,i){final a=actions[i];return Card(clipBehavior:Clip.antiAlias,child:InkWell(onTap:()=>visit(a.page()),child:Padding(padding:const EdgeInsets.all(12),child:Column(mainAxisAlignment:MainAxisAlignment.center,children:[Stack(clipBehavior: Clip.none, children: [
+              Icon(a.icon,color:Palette.primary,size:30),
+              if ((a.title == 'Pending Approvals' && hasPendingApprovals) ||
+                  (a.title == 'Sales Manager Change Requests' && hasPendingManagerRequests))
+                const Positioned(right:-5, top:-3, child:_PendingDot()),
+            ]),const SizedBox(height:10),if(a.title == 'Not Submitted' && me.isAdmin)
               Row(mainAxisAlignment:MainAxisAlignment.center,children:[
                 const Flexible(child:Text('Not Submitted',textAlign:TextAlign.center,
                   style:TextStyle(fontWeight:FontWeight.w600))),
@@ -249,6 +279,15 @@ class _HomeScreenState extends State<HomeScreen> {
       ]))));
   }
 }
+class _PendingDot extends StatelessWidget {
+  const _PendingDot();
+  @override
+  Widget build(BuildContext context) => const SizedBox(
+    width: 10, height: 10,
+    child: DecoratedBox(decoration: BoxDecoration(
+      color: Palette.red, shape: BoxShape.circle)));
+}
+
 class _StatCard extends StatelessWidget {
   const _StatCard({required this.title,required this.value,required this.icon});
   final String title,value;final IconData icon;

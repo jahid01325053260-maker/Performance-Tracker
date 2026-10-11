@@ -12,6 +12,7 @@ import '../../models/entities.dart';
 import '../../services/session.dart';
 import '../../services/report_scope.dart';
 import '../../services/report_tables.dart';
+import '../../services/calculations.dart';
 import '../auth/login_screen.dart';
 
 class ExportScreen extends StatefulWidget {
@@ -91,6 +92,10 @@ class _ExportScreenState extends State<ExportScreen> {
           pw.TableRow(children: [
             for (var c = 0; c < headers.length; c++)
               pw.Container(
+                decoration: r > 0 && c == achievementColumn &&
+                    isLowAchievementLabel(rows[r][c])
+                    ? pw.BoxDecoration(color: PdfColor.fromHex('#FFE2E2'))
+                    : null,
                 padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 5),
                 alignment: c == 0 || c == 1 || headers[c] == 'Sales Manager'
                     ? pw.Alignment.centerLeft : pw.Alignment.center,
@@ -99,7 +104,8 @@ class _ExportScreenState extends State<ExportScreen> {
                     fontWeight: r == 0 || c == 1 || boldColumns.contains(headers[c])
                         ? pw.FontWeight.bold : pw.FontWeight.normal,
                     color: r > 0 && c == achievementColumn
-                        ? PdfColor.fromHex('#24865B') : PdfColors.black),
+                        ? PdfColor.fromHex(isLowAchievementLabel(rows[r][c])
+                            ? '#C62828' : '#24865B') : PdfColors.black),
                   textAlign: c == 0 || c == 1 || headers[c] == 'Sales Manager'
                       ? pw.TextAlign.left : pw.TextAlign.center,
                 ),
@@ -140,6 +146,13 @@ class _ExportScreenState extends State<ExportScreen> {
         horizontalAlign: HorizontalAlign.Center,
         leftBorder: borders, rightBorder: borders,
         topBorder: borders, bottomBorder: borders);
+      final lowPercentageStyle = CellStyle(
+        bold: true, fontSize: 11,
+        fontColorHex: ExcelColor.fromHexString('#C62828'),
+        backgroundColorHex: ExcelColor.fromHexString('#FFE2E2'),
+        horizontalAlign: HorizontalAlign.Center,
+        leftBorder: borders, rightBorder: borders,
+        topBorder: borders, bottomBorder: borders);
       // Exactly the grid columns in the supplied six-month reference image.
       final columns = rows.first;
       for (var col = 0; col < columns.length; col++) {
@@ -164,7 +177,8 @@ class _ExportScreenState extends State<ExportScreen> {
               : TextCellValue(raw.startsWith('=') || raw.startsWith('+') ||
                    raw.startsWith('@') ? "'$raw" : raw);
           cell.cellStyle = row == 0 ? headStyle
-              : heading == 'Achievement' ? percentageStyle
+              : heading == 'Achievement' ?
+                  (isLowAchievementLabel(raw) ? lowPercentageStyle : percentageStyle)
               : numeric != null ? strongStyle : textStyle;
         }
       }
@@ -300,6 +314,24 @@ class _ExportScreenState extends State<ExportScreen> {
 class ReportPreviewScreen extends StatelessWidget {
   const ReportPreviewScreen({super.key,required this.rows});final List<List<String>> rows;
   @override Widget build(BuildContext context)=>Scaffold(appBar:AppBar(title:const Text('Report Preview')),body:ListView(padding:const EdgeInsets.all(12),children:[
-    SingleChildScrollView(scrollDirection:Axis.horizontal,child:DataTable(columns:[for(final heading in rows.first)DataColumn(label:Text(heading))],rows:[for(final row in rows.skip(1))DataRow(cells:[for(final value in row)DataCell(Text(value))])])),
+    SingleChildScrollView(scrollDirection: Axis.horizontal,
+      child: DataTable(
+        columns: [for (final heading in rows.first) DataColumn(label: Text(heading))],
+        rows: [for (final row in rows.skip(1))
+          DataRow(cells: [for (var col = 0; col < row.length; col++)
+            DataCell(rows.first[col] == 'Achievement'
+              ? Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: isLowAchievementLabel(row[col])
+                        ? const Color(0xFFFFE2E2) : null,
+                    borderRadius: BorderRadius.circular(4)),
+                  child: Text(row[col], style: TextStyle(
+                    color: isLowAchievementLabel(row[col])
+                        ? const Color(0xFFC62828) : Palette.primary,
+                    fontWeight: FontWeight.bold)))
+              : Text(row[col]))],
+          )],
+      )),
   ]));
 }

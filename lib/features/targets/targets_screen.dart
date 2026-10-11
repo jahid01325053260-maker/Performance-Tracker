@@ -66,10 +66,20 @@ class _TargetsScreenState extends State<TargetsScreen> {
         final annual=Achievement(yearlyCards,e.yearlyTarget);
         return SectionCard(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
           Row(children:[Expanded(child:Text(e.name,style:const TextStyle(fontWeight:FontWeight.bold))),if(widget.session.user!.isAdmin)TextButton(onPressed:()=>setTarget(e,t),child:const Text('Set Target'))]),
-          Text('${e.employeeId} • Monthly: ${achievement.achieved}/${achievement.target} cards • ${achievement.label}'),
+          Text.rich(TextSpan(children: [
+            TextSpan(text: '${e.employeeId} • Monthly: ${achievement.achieved}/${achievement.target} cards • '),
+            TextSpan(text: achievement.label, style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: achievement.atOrBelow50 ? Palette.red : Palette.primary)),
+          ])),
           const SizedBox(height:8),LinearProgressIndicator(value:achievement.progress),
           const SizedBox(height:10),
-          Text('Year $year: ${annual.achieved}/${annual.target} cards • ${annual.label}'),
+          Text.rich(TextSpan(children: [
+            TextSpan(text: 'Year $year: ${annual.achieved}/${annual.target} cards • '),
+            TextSpan(text: annual.label, style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: annual.atOrBelow50 ? Palette.red : Palette.primary)),
+          ])),
           const SizedBox(height:6),LinearProgressIndicator(value:annual.progress),
           if(achievement.below50)Text('Below 50% • Need ${achievement.needsFor50} card(s)',style:const TextStyle(color:Palette.red))
         ]));

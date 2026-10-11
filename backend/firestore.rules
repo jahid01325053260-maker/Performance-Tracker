@@ -184,7 +184,8 @@ service cloud.firestore {
         getAfter(proofPath(id)).data.employeeId == myId() &&
         r is string &&
         r.matches('^' + myId() + '_[0-9]{4}-(0[1-9]|1[0-2])_[0-9]{13}$') &&
-        !exists(performancePath(r)) &&
+        (!exists(performancePath(r)) ||
+          get(performancePath(r)).data.status == 'deleted') &&
         getAfter(performancePath(r)).data.employeeId == myId() &&
         getAfter(performancePath(r)).data.status == 'confirmed' &&
         getAfter(performancePath(r)).data.limit != 'NIL' &&
@@ -210,8 +211,10 @@ service cloud.firestore {
         request.resource.data.employeeId == myId() &&
         request.resource.data.recordId is string &&
         request.resource.data.recordId.matches('^' + myId() + '_[0-9]{4}-(0[1-9]|1[0-2])_[0-9]{13}$') &&
-        !exists(performancePath(request.resource.data.recordId)) &&
+        (!exists(performancePath(request.resource.data.recordId)) ||
+          get(performancePath(request.resource.data.recordId)).data.status == 'deleted') &&
         getAfter(performancePath(request.resource.data.recordId)).data.employeeId == myId() &&
+        getAfter(performancePath(request.resource.data.recordId)).data.status == 'confirmed' &&
         getAfter(scorePath()).data.lastProofId == proofId;
       allow update, delete: if false;
     }
@@ -235,11 +238,23 @@ service cloud.firestore {
             request.resource.data.normalizedAccountNo && accountFormat() &&
             request.resource.data.limit != 'NIL' &&
             hasAtomicScoreFor(recordId)));
-      // Officers cannot edit or delete submitted reports. ADMIN may edit
-      // applicant/amount only, or soft-delete with an audited score update.
-      allow update: if admin() &&
+      // ADMIN may soft-delete. A USER may ONLY reactivate their OWN
+      // previously soft-deleted 906 record, changing the status alone,
+      // atomically with a new unique ranking proof and a +1 leaderboard update.
+      allow update: if (admin() &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(
-          ['applicantName','limit','status','managerId','salesManager']);
+          ['applicantName','limit','status','managerId','salesManager'])) ||
+        (approved() && myRole() == 'USER' &&
+          resource.data.employeeId == myId() &&
+          resource.data.status == 'deleted' &&
+          resource.data.limit != 'NIL' &&
+          resource.data.normalizedAccountNo is string &&
+          resource.data.normalizedAccountNo.matches('^[0-9]{4}906[0-9]{6}$') &&
+          recordId == myId() + '_' + resource.data.reportingPeriod + '_' +
+            resource.data.normalizedAccountNo &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
+          request.resource.data.status == 'confirmed' &&
+          hasAtomicScoreFor(recordId));
       allow delete: if admin() ||
         (ownEmployee(resource.data.employeeId) && myRole() == 'USER' &&
           resource.data.limit == 'NIL' && nilReplacedAtomically());

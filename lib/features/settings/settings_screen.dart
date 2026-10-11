@@ -51,10 +51,16 @@ class SettingsScreen extends StatelessWidget {
           style: TextStyle(color: Palette.primary, fontWeight: FontWeight.bold)),
         _item(Icons.checklist_outlined, 'Pending Approvals', () =>
           Navigator.push(context, MaterialPageRoute<void>(
-            builder: (_) => ApprovalsScreen(session: session)))),
+            builder: (_) => ApprovalsScreen(session: session))),
+          attention: session.api.db.collection('employees')
+            .where('status', isEqualTo: 'Pending').snapshots()
+            .map((event) => event.docs.isNotEmpty)),
         _item(Icons.manage_accounts_outlined, 'Sales Manager Change Requests', () =>
           Navigator.push(context, MaterialPageRoute<void>(
-            builder: (_) => ManagerChangeRequestsScreen(session: session)))),
+            builder: (_) => ManagerChangeRequestsScreen(session: session))),
+          attention: session.api.db.collection('manager_change_requests')
+            .where('status', isEqualTo: 'Pending').snapshots()
+            .map((event) => event.docs.isNotEmpty)),
         _item(Icons.person_add_outlined, 'Create New User / Management ID', () =>
           Navigator.push(context, MaterialPageRoute<void>(
             builder: (_) => CreateManagementScreen(session: session)))),
@@ -87,9 +93,33 @@ class SettingsScreen extends StatelessWidget {
     ]),
   );
 
-  Widget _item(IconData icon, String label, VoidCallback action) =>
-    Card(child: ListTile(leading: Icon(icon, color: Palette.primary),
-      title: Text(label), trailing: const Icon(Icons.chevron_right), onTap: action));
+  Widget _item(IconData icon, String label, VoidCallback action,
+      {Stream<bool>? attention}) {
+    Widget tile(bool hasPending) => Card(child: ListTile(
+      leading: Icon(icon, color: Palette.primary),
+      title: Text(label),
+      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+        if (hasPending) const _SmallPendingDot(),
+        if (hasPending) const SizedBox(width: 10),
+        const Icon(Icons.chevron_right),
+      ]),
+      onTap: action));
+    if (attention == null) return tile(false);
+    return StreamBuilder<bool>(
+      stream: attention,
+      builder: (context, snapshot) => tile(snapshot.data ?? false),
+    );
+  }
+}
+
+class _SmallPendingDot extends StatelessWidget {
+  const _SmallPendingDot();
+  @override
+  Widget build(BuildContext context) => const Tooltip(
+    message: 'New request requires attention',
+    child: SizedBox(width: 10, height: 10,
+      child: DecoratedBox(decoration: BoxDecoration(
+        color: Palette.red, shape: BoxShape.circle))));
 }
 
 class _SupportDialog extends StatelessWidget {
