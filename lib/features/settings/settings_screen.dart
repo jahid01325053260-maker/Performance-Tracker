@@ -36,61 +36,75 @@ class SettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Settings')),
-    body: ListView(padding: const EdgeInsets.all(12), children: [
-      const Text('ACCOUNT & PROFILE',
-        style: TextStyle(color: Palette.primary, fontWeight: FontWeight.bold)),
-      _item(Icons.person_outline, 'My Profile', () => Navigator.push(context,
-        MaterialPageRoute<void>(builder: (_) => EmployeeProfileScreen(
-          session: session, id: session.user!.employeeId)))),
-      _item(Icons.key_outlined, 'Change Password', () =>
-        showDialog<void>(context: context,
-          builder: (_) => _ChangePasswordDialog(session: session))),
-      if (session.user!.isAdmin) ...[
-        const SizedBox(height: 16),
-        const Text('MANAGEMENT & ADMINISTRATION',
-          style: TextStyle(color: Palette.primary, fontWeight: FontWeight.bold)),
-        _item(Icons.checklist_outlined, 'Pending Approvals', () =>
-          Navigator.push(context, MaterialPageRoute<void>(
-            builder: (_) => ApprovalsScreen(session: session))),
-          attention: session.api.db.collection('employees')
-            .where('status', isEqualTo: 'Pending').snapshots()
-            .map((event) => event.docs.isNotEmpty)),
-        _item(Icons.manage_accounts_outlined, 'Sales Manager Change Requests', () =>
-          Navigator.push(context, MaterialPageRoute<void>(
-            builder: (_) => ManagerChangeRequestsScreen(session: session))),
-          attention: session.api.db.collection('manager_change_requests')
-            .where('status', isEqualTo: 'Pending').snapshots()
-            .map((event) => event.docs.isNotEmpty)),
-        _item(Icons.person_add_outlined, 'Create New User / Management ID', () =>
-          Navigator.push(context, MaterialPageRoute<void>(
-            builder: (_) => CreateManagementScreen(session: session)))),
-        _item(Icons.groups_outlined, 'Officer List', () =>
-          Navigator.push(context, MaterialPageRoute<void>(
-            builder: (_) => DirectoryScreen(session: session)))),
-        _item(Icons.backup_outlined, 'Backup / Reset', () =>
-          Navigator.push(context, MaterialPageRoute<void>(
-            builder: (_) => BackupResetScreen(session: session)))),
-      ],
-      const SizedBox(height: 16),
-      const Text('SYSTEM & SUPPORT',
-        style: TextStyle(color: Palette.primary, fontWeight: FontWeight.bold)),
-      _item(Icons.info_outline, 'About', () => showDialog<void>(
-        context: context, builder: (dialog) => AlertDialog(
-          title: const Text('Performance Tracker'),
-          content: const Text('Flutter edition • Version 1.2.0'),
-          actions: [TextButton(onPressed: () => Navigator.pop(dialog),
-            child: const Text('OK'))]))),
-      _item(Icons.help_outline, 'Help & Support', () =>
-        showDialog<void>(context: context, builder: (_) => const _SupportDialog())),
-      const SizedBox(height: 16),
-      const Text('SESSION & EXIT',
-        style: TextStyle(color: Palette.primary, fontWeight: FontWeight.bold)),
-      _item(Icons.logout, 'Exit Application / Logout', () => confirmLogout(context)),
-      const SizedBox(height: 24),
-      const Center(child: Text('Performance Tracker\n'
-        'Version 1.2.0 • Build 2026.1\nAll rights reserved',
-        textAlign: TextAlign.center, style: TextStyle(color: Palette.muted))),
-    ]),
+    // Build the short Settings menu eagerly so action tiles remain discoverable
+    // on small screens, while the page itself stays scrollable.
+    body: SingleChildScrollView(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text('ACCOUNT & PROFILE',
+            style: TextStyle(color: Palette.primary, fontWeight: FontWeight.bold)),
+          _item(Icons.person_outline, 'My Profile', () => Navigator.push(context,
+            MaterialPageRoute<void>(builder: (_) => EmployeeProfileScreen(
+              session: session, id: session.user!.employeeId)))),
+          _item(Icons.key_outlined, 'Change Password', () =>
+            showDialog<void>(context: context,
+              builder: (_) => _ChangePasswordDialog(session: session))),
+          if (session.user!.isAdmin) ...[
+            const SizedBox(height: 16),
+            const Text('MANAGEMENT & ADMINISTRATION',
+              style: TextStyle(color: Palette.primary, fontWeight: FontWeight.bold)),
+            _item(Icons.checklist_outlined, 'Pending Approvals', () =>
+              Navigator.push(context, MaterialPageRoute<void>(
+                builder: (_) => ApprovalsScreen(session: session))),
+              // Live dots require an initialized database connection. Widget
+              // tests, or an app awaiting initialization, have no default app.
+              attention: session.api.isConfigured
+                ? session.api.db.collection('employees')
+                    .where('status', isEqualTo: 'Pending').snapshots()
+                    .map((event) => event.docs.isNotEmpty)
+                : null),
+            _item(Icons.manage_accounts_outlined, 'Sales Manager Change Requests', () =>
+              Navigator.push(context, MaterialPageRoute<void>(
+                builder: (_) => ManagerChangeRequestsScreen(session: session))),
+              attention: session.api.isConfigured
+                ? session.api.db.collection('manager_change_requests')
+                    .where('status', isEqualTo: 'Pending').snapshots()
+                    .map((event) => event.docs.isNotEmpty)
+                : null),
+            _item(Icons.person_add_outlined, 'Create New User / Management ID', () =>
+              Navigator.push(context, MaterialPageRoute<void>(
+                builder: (_) => CreateManagementScreen(session: session)))),
+            _item(Icons.groups_outlined, 'Officer List', () =>
+              Navigator.push(context, MaterialPageRoute<void>(
+                builder: (_) => DirectoryScreen(session: session)))),
+            _item(Icons.backup_outlined, 'Backup / Reset', () =>
+              Navigator.push(context, MaterialPageRoute<void>(
+                builder: (_) => BackupResetScreen(session: session)))),
+          ],
+          const SizedBox(height: 16),
+          const Text('SYSTEM & SUPPORT',
+            style: TextStyle(color: Palette.primary, fontWeight: FontWeight.bold)),
+          _item(Icons.info_outline, 'About', () => showDialog<void>(
+            context: context, builder: (dialog) => AlertDialog(
+              title: const Text('Performance Tracker'),
+              content: const Text('Flutter edition • Version 1.2.0'),
+              actions: [TextButton(onPressed: () => Navigator.pop(dialog),
+                child: const Text('OK'))]))),
+          _item(Icons.help_outline, 'Help & Support', () =>
+            showDialog<void>(context: context, builder: (_) => const _SupportDialog())),
+          const SizedBox(height: 16),
+          const Text('SESSION & EXIT',
+            style: TextStyle(color: Palette.primary, fontWeight: FontWeight.bold)),
+          _item(Icons.logout, 'Exit Application / Logout', () => confirmLogout(context)),
+          const SizedBox(height: 24),
+          const Center(child: Text('Performance Tracker\n'
+            'Version 1.2.0 • Build 2026.1\nAll rights reserved',
+            textAlign: TextAlign.center, style: TextStyle(color: Palette.muted))),
+        ],
+      ),
+    ),
   );
 
   Widget _item(IconData icon, String label, VoidCallback action,
