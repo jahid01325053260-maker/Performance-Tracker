@@ -23,6 +23,8 @@ import '../ranking/ranking_screen.dart';
 import '../targets/targets_screen.dart';
 import '../reports/export_screen.dart';
 import '../settings/settings_screen.dart';
+import '../settings/updates_screen.dart';
+import '../../services/update_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key,required this.session});
@@ -49,6 +51,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override void initState(){
     super.initState();reload();
     _listenForAlerts();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkForAppUpdate());
     if (widget.session.user?.isAdmin == true) {
       approvalChanges = widget.session.api.db.collection('employees')
           .where('status', isEqualTo: 'Pending').snapshots().listen((snapshot) {
@@ -75,6 +78,28 @@ class _HomeScreenState extends State<HomeScreen> {
     managerRequestChanges?.cancel();
     super.dispose();
   }
+  Future<void> _checkForAppUpdate() async {
+    final updater = UpdateService();
+    try {
+      if (!await updater.autoCheckEnabled()) return;
+      final result = await updater.checkForUpdate();
+      if (!mounted || !result.updateAvailable) return;
+      final open = await showUpdateAvailableDialog(context, result);
+      if (!mounted || !open) return;
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => UpdatesScreen(initialResult: result),
+        ),
+      );
+    } catch (_) {
+      // Update checks must never block sign-in or dashboard use. Manual check is
+      // always available from Settings > Updates and exposes any network error.
+    } finally {
+      updater.close();
+    }
+  }
+
   Future<void> _listenForAlerts() async {
     if (!widget.session.api.isConfigured) return;
     final uid = widget.session.api.auth.currentUser?.uid ?? '';
