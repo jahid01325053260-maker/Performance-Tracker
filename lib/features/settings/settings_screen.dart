@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/theme.dart';
@@ -9,6 +10,7 @@ import '../auth/login_screen.dart';
 import '../employees/directory_screen.dart';
 import '../employees/sales_manager_picker.dart';
 import 'backup_reset_screen.dart';
+import 'updates_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key, required this.session});
@@ -86,12 +88,11 @@ class SettingsScreen extends StatelessWidget {
           const SizedBox(height: 16),
           const Text('SYSTEM & SUPPORT',
             style: TextStyle(color: Palette.primary, fontWeight: FontWeight.bold)),
+          _item(Icons.system_update_alt, 'Updates', () =>
+            Navigator.push(context, MaterialPageRoute<void>(
+              builder: (_) => const UpdatesScreen()))),
           _item(Icons.info_outline, 'About', () => showDialog<void>(
-            context: context, builder: (dialog) => AlertDialog(
-              title: const Text('Performance Tracker'),
-              content: const Text('Flutter edition • Version 1.2.0'),
-              actions: [TextButton(onPressed: () => Navigator.pop(dialog),
-                child: const Text('OK'))]))),
+            context: context, builder: (dialog) => const _AboutDialog())),
           _item(Icons.help_outline, 'Help & Support', () =>
             showDialog<void>(context: context, builder: (_) => const _SupportDialog())),
           const SizedBox(height: 16),
@@ -100,7 +101,7 @@ class SettingsScreen extends StatelessWidget {
           _item(Icons.logout, 'Exit Application / Logout', () => confirmLogout(context)),
           const SizedBox(height: 24),
           const Center(child: Text('Performance Tracker\n'
-            'Version 1.2.0 • Build 2026.1\nAll rights reserved',
+            'Use Updates to check the installed and latest version\nAll rights reserved',
             textAlign: TextAlign.center, style: TextStyle(color: Palette.muted))),
         ],
       ),
@@ -124,6 +125,28 @@ class SettingsScreen extends StatelessWidget {
       builder: (context, snapshot) => tile(snapshot.data ?? false),
     );
   }
+}
+
+
+class _AboutDialog extends StatelessWidget {
+  const _AboutDialog();
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Performance Tracker'),
+    content: FutureBuilder<PackageInfo>(
+      future: PackageInfo.fromPlatform(),
+      builder: (context, snapshot) {
+        final info = snapshot.data;
+        final version = info == null ? 'Loading version…'
+            : 'Version ${info.version} • Build ${info.buildNumber}';
+        return Text('Flutter edition\n$version');
+      },
+    ),
+    actions: [
+      TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK')),
+    ],
+  );
 }
 
 class _SmallPendingDot extends StatelessWidget {
