@@ -33,7 +33,7 @@ dependencies:
   url_launcher: ^6.3.2
   # In-app updater: keep these versions compatible with the project's current
   # Flutter/Android toolchain instead of forcing the newest AGP requirement.
-  package_info_plus: 9.0.1
+  package_info_plus: 10.2.2
   path_provider: 2.1.5
   open_filex: 4.7.0
 dev_dependencies:
