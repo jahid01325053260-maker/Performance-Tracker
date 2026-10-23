@@ -28,8 +28,41 @@ jobs:
         run: flutter test
       - name: Configure existing Firebase Android app
         run: python3 tool/configure_firebase_android.py
+      - name: Configure Android in-app updater permission
+        run: python3 tool/configure_android_updater.py
+
+      # Android only accepts an APK as an update when it is signed with the same
+      # certificate as the installed app. Tagged production releases therefore
+      # use one persistent keystore stored only in GitHub Secrets.
+      - name: Require stable signing secrets for tagged update releases
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::$name GitHub Secret is required for installable in-app updates."
+              exit 1
+            fi
+          done
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/release-keystore.jks
+          cat > android/key.properties <<PROPS
+          storePassword=$ANDROID_KEYSTORE_PASSWORD
+          keyPassword=$ANDROID_KEY_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          storeFile=release-keystore.jks
+          PROPS
+          python3 tool/configure_android_release_signing.py
+
       - name: Build small ABI-specific release APKs
-        run: flutter build apk --release --split-per-abi --tree-shake-icons
+        run: >-
+          flutter build apk --release --split-per-abi --tree-shake-icons
+          --dart-define=UPDATE_GITHUB_REPOSITORY=${{ github.repository }}
       - name: Show resulting APK sizes
         run: ls -lh build/app/outputs/flutter-apk/*-release.apk
       - uses: actions/upload-artifact@v4
@@ -37,8 +70,9 @@ jobs:
           name: PerformanceTracker-Optimized-Release-APKs
           path: build/app/outputs/flutter-apk/*-release.apk
           if-no-files-found: error
-      - name: Attach ABI-specific APKs to tagged GitHub Release
+      - name: Attach signed ABI-specific APKs to tagged GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          generate_release_notes: true
           files: build/app/outputs/flutter-apk/*-release.apk

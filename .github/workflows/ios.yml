@@ -15,7 +15,9 @@ jobs:
       - run: flutter create --project-name performance_tracker_flutter --org com.performance --platforms=ios .
       - run: flutter pub get
       - name: Build unsigned iOS device bundle (NOT installable IPA)
-        run: flutter build ios --release --no-codesign
+        run: >-
+          flutter build ios --release --no-codesign
+          --dart-define=UPDATE_GITHUB_REPOSITORY=${{ github.repository }}
       - uses: actions/upload-artifact@v4
         with:
           name: PerformanceTracker-iOS-Unsigned

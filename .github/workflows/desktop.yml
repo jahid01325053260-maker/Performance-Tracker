@@ -159,11 +159,16 @@ jobs:
       - name: Build release Windows application with Firebase
         if: matrix.target == 'windows'
         shell: pwsh
-        run: flutter build windows --release --dart-define-from-file=firebase_config/windows/firebase_options.local.json
+        run: >-
+          flutter build windows --release
+          --dart-define-from-file=firebase_config/windows/firebase_options.local.json
+          --dart-define=UPDATE_GITHUB_REPOSITORY=${{ github.repository }}
 
       - name: Build release Linux or macOS application
         if: matrix.target != 'windows'
-        run: flutter build ${{ matrix.target }} --release
+        run: >-
+          flutter build ${{ matrix.target }} --release
+          --dart-define=UPDATE_GITHUB_REPOSITORY=${{ github.repository }}
 
       - uses: actions/upload-artifact@v4
         with:
