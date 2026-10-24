@@ -536,11 +536,13 @@ class _ManagerChangeRequestsScreenState extends State<ManagerChangeRequestsScree
 
   Future<void> decision(Map<String, dynamic> request, bool approve) async {
     final id = '${request['employeeId'] ?? ''}';
+    final employeeName = '${request['employeeName'] ?? ''}'.trim();
     if (busy != null) return;
     final confirmed = await showDialog<bool>(context: context,
       builder: (ctx) => AlertDialog(
         title: Text(approve ? 'Approve manager reassignment?' : 'Reject manager change?'),
-        content: Text('Officer: $id\nNew manager: ${request['managerName']}\n'
+        content: Text('Officer: ${employeeName.isEmpty ? id : '$employeeName ($id)'}\n'
+          'New manager: ${request['managerName']}\n'
           'Approving will also update historical private report team ownership.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('CANCEL')),
@@ -561,6 +563,13 @@ class _ManagerChangeRequestsScreenState extends State<ManagerChangeRequestsScree
       if (mounted) setState(() => busy = null);
     }
   }
+
+  String _requestTitle(Map<String, dynamic> item) {
+    final id = '${item['employeeId'] ?? ''}'.trim();
+    final name = '${item['employeeName'] ?? ''}'.trim();
+    return name.isEmpty ? 'Officer $id' : '$name • $id';
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Sales Manager Change Requests'),
@@ -573,7 +582,7 @@ class _ManagerChangeRequestsScreenState extends State<ManagerChangeRequestsScree
         if (snapshot.data!.isEmpty) return const Center(child: Text('No pending manager changes'));
         return ListView(children: [for (final item in snapshot.data!) Card(
           child: ListTile(
-            title: Text('Officer ${item['employeeId']}'),
+            title: Text(_requestTitle(item)),
             subtitle: Text('Requested Sales Manager: ${item['managerName']}'),
             trailing: busy == item['employeeId']
               ? const CircularProgressIndicator()

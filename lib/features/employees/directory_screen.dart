@@ -2,14 +2,17 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image/image.dart' as img;
 import '../../core/theme.dart';
 import '../../models/entities.dart';
 import '../../services/session.dart';
+import '../../services/profile_photo_processor.dart';
 import '../auth/login_screen.dart';
 import 'sales_manager_picker.dart';
 import 'admin_account_actions.dart';
+import 'profile_photo_adjust_screen.dart';
 
 class DirectoryScreen extends StatefulWidget {
   const DirectoryScreen({super.key,required this.session}); final Session session;
@@ -99,23 +102,49 @@ class _EmployeeProfileScreenState extends State<EmployeeProfileScreen> {
     future = widget.session.api.profile(widget.id);
   }
   Future<void> updatePhoto(Employee e) async {
-    if(!widget.session.user!.isAdmin && widget.session.user!.employeeId != e.employeeId) return;
+    if(!widget.session.user!.isAdmin && widget.session.user!.employeeId != e.employeeId) {
+      return;
+    }
     try {
       final chosen = await FilePicker.pickFiles(type: FileType.image);
-      if(chosen.isEmpty) return;
-      final file=chosen.single;
-      if(await file.length()>12*1024*1024) throw const FormatException('Image must be under 12 MB');
-      final bytes = await file.readAsBytes();
-      if(bytes.length > 12*1024*1024) throw const FormatException('Image must be under 12 MB');
+      if(chosen.isEmpty) {
+        return;
+      }
+      final bytes = await chosen.single.readAsBytes();
       final decoded = img.decodeImage(bytes);
-      if(decoded == null) throw const FormatException('Unsupported image format');
-      final maxDimension = decoded.width > decoded.height ? decoded.width : decoded.height;
-      final resized = maxDimension > 512 ? img.copyResize(decoded, width:decoded.width * 512 ~/ maxDimension, height:decoded.height * 512 ~/ maxDimension) : decoded;
-      final optimized = img.encodeJpg(resized, quality: 65);
-      if(optimized.length > 190000) throw const FormatException('Image still too large');
-      await widget.session.api.editProfile(e.employeeId, {'profileImage':base64Encode(optimized)});
-      if(mounted) { showMessage(context,'Profile photo updated'); setState(load); }
-    } catch(error) {if(mounted) showMessage(context,'$error');}
+      if(decoded == null) {
+        throw const FormatException('Unsupported image format');
+      }
+      if(!mounted) {
+        return;
+      }
+      final adjustment = await Navigator.push<ProfilePhotoAdjustment>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ProfilePhotoAdjustScreen(source: decoded),
+        ),
+      );
+      if(adjustment == null || !mounted) {
+        return;
+      }
+      final cropped = ProfilePhotoProcessor.applyAdjustment(decoded, adjustment);
+      final optimized = ProfilePhotoProcessor.compressToTarget(cropped);
+      await widget.session.api.editProfile(
+        e.employeeId,
+        {'profileImage': base64Encode(optimized)},
+      );
+      if(mounted) {
+        showMessage(
+          context,
+          'Profile photo updated • ${(optimized.length / 1024).toStringAsFixed(1)} KB',
+        );
+        setState(load);
+      }
+    } catch(error) {
+      if(mounted) {
+        showMessage(context,'Photo update failed: $error');
+      }
+    }
   }
   Future<void> edit(Employee e) async {
     final allowed=widget.session.user!.isAdmin||widget.session.user!.employeeId==e.employeeId;
@@ -246,13 +275,38 @@ class _EmployeeProfileScreenState extends State<EmployeeProfileScreen> {
         ])),
         SectionCard(child:Column(children:[
           _field('Branch',e.displayBranch),_field('Zone',e.displayZone),_field('Department',e.department),
-          if(e.isOfficer)_field('Sales Manager',e.salesManager),_field('Mobile',e.mobile),_field('Official Number',e.officialNumber),_field('Recovery email',e.email),
+          if(e.isOfficer)_field('Sales Manager',e.salesManager),
+          _field('Mobile',e.mobile,copyable:true),
+          _field('Official Number',e.officialNumber,copyable:true),
+          _field('Recovery email',e.email,copyable:true),
           if(e.isOfficer)_field('Monthly Target',e.monthlyTarget>0?'${e.monthlyTarget} cards (repeats monthly)':'No Target Assigned'),
           if(e.isOfficer)_field('Yearly Target',e.yearlyTarget>0?'${e.yearlyTarget} cards (annual default)':'No Target Assigned'),
         ])),
       ])));
     }));
-  Widget _field(String label,String value)=>ListTile(dense:true,title:Text(label,style:const TextStyle(color:Palette.muted)),subtitle:Text(value.isEmpty?'N/A':value));
+
+  Future<void> _copyContact(String label, String value) async {
+    final text=value.trim();
+    if(text.isEmpty){
+      showMessage(context,'No $label available');
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text:text));
+    if(mounted) {
+      showMessage(context,'$label copied');
+    }
+  }
+
+  Widget _field(String label,String value,{bool copyable=false})=>ListTile(
+    dense:true,
+    title:Text(label,style:const TextStyle(color:Palette.muted)),
+    subtitle:Text(value.isEmpty?'N/A':value),
+    trailing:copyable&&value.trim().isNotEmpty?IconButton(
+      tooltip:'Copy $label',
+      onPressed:()=>_copyContact(label,value),
+      icon:const Icon(Icons.copy_outlined),
+    ):null,
+  );
 }
 
 

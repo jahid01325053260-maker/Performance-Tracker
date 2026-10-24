@@ -226,8 +226,26 @@ class ApiClient {
   Future<List<Map<String, dynamic>>> managerChangeRequests() async {
     if (!(await me()).isAdmin) throw const ApiException('Admin only.', 403);
     final snapshot = await db.collection('manager_change_requests').get();
-    return snapshot.docs.map((doc) => {...doc.data(), 'id': doc.id})
-        .where((data) => data['status'] == 'Pending').toList();
+    final pending = snapshot.docs
+        .map((doc) => {...doc.data(), 'id': doc.id})
+        .where((data) => data['status'] == 'Pending')
+        .toList();
+    final enriched = await Future.wait(pending.map((data) async {
+      final employeeId = '${data['employeeId'] ?? data['id'] ?? ''}'.trim();
+      var employeeName = '${data['employeeName'] ?? ''}'.trim();
+      if (employeeName.isEmpty && employeeId.isNotEmpty) {
+        try {
+          final employee = await db.collection('employees').doc(employeeId).get();
+          employeeName = '${employee.data()?['name'] ?? ''}'.trim();
+        } catch (_) {
+          // Keep the request visible even if the employee lookup temporarily fails.
+        }
+      }
+      return {...data, 'employeeId': employeeId, 'employeeName': employeeName};
+    }));
+    enriched.sort((a, b) =>
+        '${a['employeeName']}'.toLowerCase().compareTo('${b['employeeName']}'.toLowerCase()));
+    return enriched;
   }
 
   Future<void> decideManagerChange(String employeeId, bool approve) async {
