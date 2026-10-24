@@ -1,8 +1,15 @@
 name: Desktop Builds
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Optional GitHub Release tag to publish/update (example: V1.3 or v1.3.0)'
+        required: false
+        type: string
   push:
-    tags: ['v*']
+    tags:
+      - 'v*'
+      - 'V*'
 
 permissions:
   contents: write
@@ -44,6 +51,46 @@ jobs:
 
       - name: Resolve Flutter packages
         run: flutter pub get
+
+      - name: Resolve Windows release version
+        if: matrix.target == 'windows'
+        shell: pwsh
+        env:
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $tag = ''
+          if ($env:REF_TYPE -eq 'tag') {
+            $tag = $env:REF_NAME.Trim()
+          } elseif (-not [string]::IsNullOrWhiteSpace($env:INPUT_RELEASE_TAG)) {
+            $tag = $env:INPUT_RELEASE_TAG.Trim()
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace($tag)) {
+            $version = $tag -replace '^[vV]', ''
+            $version = ($version -split '[+-]')[0]
+          } else {
+            $versionLine = Select-String -Path 'pubspec.yaml' -Pattern '^version:\s*([^+\s]+)' | Select-Object -First 1
+            if ($null -eq $versionLine) { throw 'pubspec.yaml does not contain a valid version.' }
+            $version = $versionLine.Matches[0].Groups[1].Value
+          }
+
+          if ($version -notmatch '^\d+(\.\d+){0,2}$') {
+            throw "Windows build version '$version' is invalid. Use tags such as v1.3.0 or V1.3."
+          }
+          $parts = @($version.Split('.'))
+          while ($parts.Count -lt 3) { $parts += '0' }
+          $buildName = ($parts[0..2] -join '.')
+
+          "WINDOWS_BUILD_NAME=$buildName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "WINDOWS_RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Windows app version: $buildName"
+          if (-not [string]::IsNullOrWhiteSpace($tag)) {
+            Write-Host "Windows installer will be published to release: $tag"
+          }
 
       # firebase_core 4.15.0 expects Firebase C++ SDK 13.12.0. Its default
       # CMake download uses dl.google.com and may fail on a transient HTTP/2
@@ -91,7 +138,6 @@ jobs:
 
       # Windows only: accept either the legacy one-JSON secret or the five
       # PT_* repository Variables/Secrets. Never require both methods.
-      # Credentials for Firebase Admin are NOT used by the Flutter client.
       - name: Prepare Windows app connection settings
         if: matrix.target == 'windows'
         shell: pwsh
@@ -112,7 +158,6 @@ jobs:
             } catch {
               throw 'WINDOWS_FIREBASE_OPTIONS_JSON is not valid JSON. Correct it, or remove it and use the five PT_* Variables/Secrets.'
             }
-            # Accept either FIREBASE_* or PT_* property names in the JSON.
             foreach ($name in @('API_KEY','APP_ID','MESSAGING_SENDER_ID','PROJECT_ID','AUTH_DOMAIN')) {
               $first = $json."FIREBASE_$name"
               $second = $json."PT_$name"
@@ -161,8 +206,86 @@ jobs:
         shell: pwsh
         run: >-
           flutter build windows --release
+          --build-name=$env:WINDOWS_BUILD_NAME
+          --build-number=${{ github.run_number }}
           --dart-define-from-file=firebase_config/windows/firebase_options.local.json
           --dart-define=UPDATE_GITHUB_REPOSITORY=${{ github.repository }}
+
+      - name: Add Windows VC++ runtime DLLs
+        if: matrix.target == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $releaseDir = Join-Path $env:GITHUB_WORKSPACE 'build/windows/x64/runner/Release'
+          foreach ($dll in @('msvcp140.dll','vcruntime140.dll','vcruntime140_1.dll')) {
+            if (Test-Path (Join-Path $releaseDir $dll)) { continue }
+            $candidate = Get-ChildItem 'C:\Program Files\Microsoft Visual Studio\2022' -Filter $dll -File -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '\\x64\\' } |
+              Select-Object -First 1
+            if ($null -ne $candidate) {
+              Copy-Item $candidate.FullName -Destination (Join-Path $releaseDir $dll) -Force
+              Write-Host "Bundled $dll"
+            } else {
+              Write-Warning "$dll was not found on the runner. The target PC may need the Microsoft VC++ Redistributable."
+            }
+          }
+
+      - name: Build Windows installer EXE
+        if: matrix.target == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          choco install innosetup --no-progress -y
+
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { throw "Inno Setup compiler not found: $iscc" }
+          $versionDefine = '/DAppVersion="' + $env:WINDOWS_BUILD_NAME + '"'
+          & $iscc $versionDefine 'windows\installer\performance_tracker.iss'
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup compilation failed.' }
+
+          $installer = Join-Path $env:GITHUB_WORKSPACE 'build/windows/installer/PerformanceTracker-windows-x64-setup.exe'
+          if (-not (Test-Path $installer)) { throw "Windows installer was not created: $installer" }
+
+          $portable = Join-Path $env:GITHUB_WORKSPACE 'build/windows/installer/PerformanceTracker-windows-x64-portable.zip'
+          Compress-Archive -Path 'build/windows/x64/runner/Release/*' -DestinationPath $portable -Force
+          Write-Host "Windows installer: $installer"
+          Write-Host "Windows portable archive: $portable"
+
+      - name: Publish Windows files to GitHub Release
+        if: matrix.target == 'windows' && (github.ref_type == 'tag' || inputs.release_tag != '')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:WINDOWS_RELEASE_TAG
+          if ([string]::IsNullOrWhiteSpace($tag)) { throw 'Release tag was not resolved.' }
+
+          $releaseExists = $false
+          for ($attempt = 1; $attempt -le 6; $attempt++) {
+            & gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+            if ($LASTEXITCODE -eq 0) {
+              $releaseExists = $true
+              break
+            }
+            Start-Sleep -Seconds 5
+          }
+
+          if (-not $releaseExists) {
+            & gh release create $tag --repo $env:GITHUB_REPOSITORY --title "Performance Tracker $tag" --generate-notes
+            if ($LASTEXITCODE -ne 0) {
+              # Android and Windows release workflows can run at the same time.
+              # If the other workflow created the release first, continue.
+              & gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+              if ($LASTEXITCODE -ne 0) { throw "Unable to create or find GitHub Release $tag" }
+            }
+          }
+
+          & gh release upload $tag `
+            'build/windows/installer/PerformanceTracker-windows-x64-setup.exe' `
+            'build/windows/installer/PerformanceTracker-windows-x64-portable.zip' `
+            --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to upload Windows release assets.' }
 
       - name: Build release Linux or macOS application
         if: matrix.target != 'windows'
@@ -170,11 +293,16 @@ jobs:
           flutter build ${{ matrix.target }} --release
           --dart-define=UPDATE_GITHUB_REPOSITORY=${{ github.repository }}
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload desktop build artifact (manual non-release runs only)
+        if: github.ref_type != 'tag' && inputs.release_tag == ''
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: PerformanceTracker-${{ matrix.target }}
+          retention-days: 1
           path: |
-            build/windows/x64/runner/Release/**
+            build/windows/installer/PerformanceTracker-windows-x64-setup.exe
+            build/windows/installer/PerformanceTracker-windows-x64-portable.zip
             build/linux/x64/release/bundle/**
             build/macos/Build/Products/Release/*.app/**
           if-no-files-found: error

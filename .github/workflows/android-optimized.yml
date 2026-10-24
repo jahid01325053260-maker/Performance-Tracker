@@ -39,6 +39,38 @@ jobs:
       - name: Resolve Dart dependencies
         run: flutter pub get
 
+      - name: Resolve app version for release tag
+        shell: bash
+        env:
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          tag=""
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            tag="${GITHUB_REF_NAME}"
+          elif [[ -n "${INPUT_RELEASE_TAG:-}" ]]; then
+            tag="${INPUT_RELEASE_TAG}"
+          fi
+
+          if [[ -n "$tag" ]]; then
+            version="${tag#[vV]}"
+            version="${version%%+*}"
+            version="${version%%-*}"
+          else
+            version=$(sed -nE 's/^version:[[:space:]]*([^+[:space:]]+).*/\1/p' pubspec.yaml | head -n1)
+          fi
+
+          if [[ ! "$version" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
+            echo "::error::Invalid app version '$version'. Use a tag such as v1.3.0 or V1.3."
+            exit 1
+          fi
+          IFS='.' read -r major minor patch <<< "$version"
+          minor=${minor:-0}
+          patch=${patch:-0}
+          build_name="$major.$minor.$patch"
+          echo "PT_BUILD_NAME=$build_name" >> "$GITHUB_ENV"
+          echo "Build version: $build_name"
+
       - name: Analyze
         run: flutter analyze
 
@@ -83,6 +115,8 @@ jobs:
       - name: Build small ABI-specific release APKs
         run: >-
           flutter build apk --release --split-per-abi --tree-shake-icons
+          --build-name=$PT_BUILD_NAME
+          --build-number=${{ github.run_number }}
           --dart-define=UPDATE_GITHUB_REPOSITORY=${{ github.repository }}
 
       - name: Prepare clearly named release APKs
