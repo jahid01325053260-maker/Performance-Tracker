@@ -215,7 +215,29 @@ class UpdateService {
     return apks.length == 1 ? apks.single : null;
   }
 
-  Future<String> downloadApk(
+  ReleaseAsset? compatibleWindowsInstaller(AppRelease release) {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.windows) return null;
+    final installers = release.assets
+        .where((asset) => asset.name.toLowerCase().endsWith('.exe'))
+        .where((asset) => !asset.name.toLowerCase().contains('debug'))
+        .toList(growable: false);
+    if (installers.isEmpty) return null;
+
+    for (final asset in installers) {
+      final lower = asset.name.toLowerCase();
+      if (lower.contains('windows') &&
+          (lower.contains('setup') || lower.contains('installer'))) {
+        return asset;
+      }
+    }
+    for (final asset in installers) {
+      final lower = asset.name.toLowerCase();
+      if (lower.contains('setup') || lower.contains('installer')) return asset;
+    }
+    return installers.length == 1 ? installers.single : null;
+  }
+
+  Future<String> downloadAsset(
     ReleaseAsset asset, {
     required void Function(int received, int total) onProgress,
   }) async {
@@ -243,9 +265,15 @@ class UpdateService {
     } finally {
       await sink.close();
     }
-    if (received == 0) throw const FileSystemException('Downloaded APK is empty.');
+    if (received == 0) throw const FileSystemException('Downloaded update is empty.');
     return file.path;
   }
+
+  Future<String> downloadApk(
+    ReleaseAsset asset, {
+    required void Function(int received, int total) onProgress,
+  }) =>
+      downloadAsset(asset, onProgress: onProgress);
 
   Future<void> installDownloadedApk(String path) async {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
@@ -258,6 +286,34 @@ class UpdateService {
     if (result.type != ResultType.done) {
       throw StateError(result.message);
     }
+  }
+
+  Future<void> installDownloadedWindowsInstaller(String path) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.windows) {
+      throw UnsupportedError('Direct EXE installation is available on Windows only.');
+    }
+    final installer = File(path);
+    if (!await installer.exists() || !path.toLowerCase().endsWith('.exe')) {
+      throw const FileSystemException('Downloaded Windows installer was not found.');
+    }
+
+    await Process.start(
+      path,
+      const <String>[
+        '/VERYSILENT',
+        '/SUPPRESSMSGBOXES',
+        '/NORESTART',
+        '/CLOSEAPPLICATIONS',
+      ],
+      mode: ProcessStartMode.detached,
+    );
+
+    // The installer replaces files that belong to this running process. Give it
+    // a moment to start, then close this instance. The Inno Setup package
+    // launches the updated Performance Tracker automatically when installation
+    // finishes.
+    await Future<void>.delayed(const Duration(milliseconds: 700));
+    exit(0);
   }
 
   Future<void> openReleasePage(AppRelease release) async {
