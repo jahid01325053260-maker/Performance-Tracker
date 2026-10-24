@@ -142,7 +142,12 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
     final release = current?.latestRelease;
     if (current == null || release == null) return;
 
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+    final isAndroid =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+    final isWindows =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+
+    if (!isAndroid && !isWindows) {
       try {
         await service.openReleasePage(release);
       } catch (e) {
@@ -151,19 +156,31 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
       return;
     }
 
-    final asset = service.compatibleAndroidApk(release);
+    final asset = isAndroid
+        ? service.compatibleAndroidApk(release)
+        : service.compatibleWindowsInstaller(release);
     if (asset == null) {
+      final platformFile = isAndroid ? 'APK' : 'Windows installer EXE';
       final open = await showDialog<bool>(
         context: context,
         builder: (dialog) => AlertDialog(
-          title: const Text('Compatible APK not found'),
-          content: const Text(
-            'This release does not contain an APK matching this device architecture. '
-            'You can open the GitHub release page and install a compatible file manually.',
+          title: Text('Compatible $platformFile not found'),
+          content: Text(
+            isAndroid
+                ? 'This release does not contain an APK matching this device architecture. '
+                    'You can open the GitHub release page and install a compatible file manually.'
+                : 'This release does not contain the Performance Tracker Windows setup EXE. '
+                    'Open the GitHub release page to download the Windows installer manually.',
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(dialog, false), child: const Text('CANCEL')),
-            FilledButton(onPressed: () => Navigator.pop(dialog, true), child: const Text('OPEN RELEASE')),
+            TextButton(
+              onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('CANCEL'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialog, true),
+              child: const Text('OPEN RELEASE'),
+            ),
           ],
         ),
       );
@@ -183,31 +200,51 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
         icon: const CircleAvatar(
           radius: 28,
           backgroundColor: Palette.pale,
-          child: Icon(Icons.download_for_offline_outlined, color: Palette.primary, size: 30),
+          child: Icon(
+            Icons.download_for_offline_outlined,
+            color: Palette.primary,
+            size: 30,
+          ),
         ),
         title: const Text('Download Update?'),
         content: Text(
-          'Performance Tracker v${release.version} is available '
-          '(you have v${current.installedVersion}). The APK will be downloaded and the Android installer will open.',
+          isAndroid
+              ? 'Performance Tracker v${release.version} is available '
+                  '(you have v${current.installedVersion}). The APK will be '
+                  'downloaded and the Android installer will open.'
+              : 'Performance Tracker v${release.version} is available '
+                  '(you have v${current.installedVersion}). The Windows setup '
+                  'EXE will be downloaded, this app will close briefly, and '
+                  'the updated version will open automatically after installation.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(dialog, false), child: const Text('Not Now')),
-          FilledButton(onPressed: () => Navigator.pop(dialog, true), child: const Text('Download')),
+          TextButton(
+            onPressed: () => Navigator.pop(dialog, false),
+            child: const Text('Not Now'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialog, true),
+            child: const Text('Download'),
+          ),
         ],
       ),
     );
     if (confirm != true || !mounted) return;
 
-    final progress = ValueNotifier<_DownloadState>(const _DownloadState(0, 0));
+    final progress =
+        ValueNotifier<_DownloadState>(const _DownloadState(0, 0));
     var progressDialogOpen = true;
     unawaited(showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => _DownloadProgressDialog(version: release.version, progress: progress),
+      builder: (_) => _DownloadProgressDialog(
+        version: release.version,
+        progress: progress,
+      ),
     ));
 
     try {
-      final path = await service.downloadApk(
+      final path = await service.downloadAsset(
         asset,
         onProgress: (received, total) {
           progress.value = _DownloadState(received, total);
@@ -218,13 +255,18 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
         Navigator.of(context, rootNavigator: true).pop();
         progressDialogOpen = false;
       }
-      await service.installDownloadedApk(path);
-      if (mounted) {
-        showMessage(
-          context,
-          'Android installer opened. If asked, allow installation from this source. '
-          'Do not uninstall the current app; install the new APK over it.',
-        );
+
+      if (isAndroid) {
+        await service.installDownloadedApk(path);
+        if (mounted) {
+          showMessage(
+            context,
+            'Android installer opened. If asked, allow installation from this source. '
+            'Do not uninstall the current app; install the new APK over it.',
+          );
+        }
+      } else {
+        await service.installDownloadedWindowsInstaller(path);
       }
     } catch (e) {
       if (mounted && progressDialogOpen) {
@@ -232,14 +274,23 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
         progressDialogOpen = false;
       }
       if (mounted) {
+        final fileLabel = isAndroid ? 'APK' : 'Windows installer';
         final open = await showDialog<bool>(
           context: context,
           builder: (dialog) => AlertDialog(
             title: const Text('Update could not be installed'),
-            content: Text('$e\n\nYou can open the release page and download the APK manually.'),
+            content: Text(
+              '$e\n\nYou can open the release page and download the $fileLabel manually.',
+            ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(dialog, false), child: const Text('CLOSE')),
-              FilledButton(onPressed: () => Navigator.pop(dialog, true), child: const Text('OPEN RELEASE')),
+              TextButton(
+                onPressed: () => Navigator.pop(dialog, false),
+                child: const Text('CLOSE'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialog, true),
+                child: const Text('OPEN RELEASE'),
+              ),
             ],
           ),
         );
@@ -247,7 +298,9 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
           try {
             await service.openReleasePage(release);
           } catch (openError) {
-            if (mounted) showMessage(context, 'Unable to open release page: $openError');
+            if (mounted) {
+              showMessage(context, 'Unable to open release page: $openError');
+            }
           }
         }
       }
@@ -308,6 +361,13 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
     final current = result;
     final release = current?.latestRelease;
     final hasUpdate = current?.updateAvailable == true;
+    final directInstall = !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.windows);
+    final installedIcon =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.windows
+            ? Icons.desktop_windows_outlined
+            : Icons.phone_android_outlined;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Updates'),
@@ -329,7 +389,7 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
               Row(
                 children: [
                   Expanded(child: _InfoCard(
-                    icon: Icons.phone_android_outlined,
+                    icon: installedIcon,
                     title: 'v${current?.installedVersion ?? '—'}',
                     subtitle: 'Installed',
                   )),
@@ -347,7 +407,7 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
                 onPressed: release == null ? _refresh : (hasUpdate ? _downloadAndInstall : null),
                 icon: Icon(hasUpdate ? Icons.download : Icons.check_circle_outline),
                 label: Text(hasUpdate
-                    ? (defaultTargetPlatform == TargetPlatform.android
+                    ? (directInstall
                         ? 'Download & Install v${release!.version}'
                         : 'Open Release v${release!.version}')
                     : release == null
