@@ -52,6 +52,9 @@ jobs:
       - name: Resolve Flutter packages
         run: flutter pub get
 
+      - name: Apply Performance Tracker logo
+        run: dart run tool/apply_app_branding.dart ${{ matrix.target }}
+
       - name: Resolve Windows release version
         if: matrix.target == 'windows'
         shell: pwsh

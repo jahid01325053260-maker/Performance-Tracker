@@ -39,6 +39,9 @@ jobs:
       - name: Resolve Dart dependencies
         run: flutter pub get
 
+      - name: Apply Performance Tracker logo
+        run: dart run tool/apply_app_branding.dart android
+
       - name: Resolve app version for release tag
         shell: bash
         env:
