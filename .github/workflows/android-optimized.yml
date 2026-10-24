@@ -65,11 +65,20 @@ jobs:
           --dart-define=UPDATE_GITHUB_REPOSITORY=${{ github.repository }}
       - name: Show resulting APK sizes
         run: ls -lh build/app/outputs/flutter-apk/*-release.apk
-      - uses: actions/upload-artifact@v4
+      # GitHub Actions artifacts consume the account/repository Actions storage
+      # quota. Tagged builds do not need this temporary copy because the APKs are
+      # published as GitHub Release assets below (the in-app updater reads those).
+      # For a manual build we still try to provide a short-lived artifact, but a
+      # full quota must never turn an otherwise successful APK build into a failure.
+      - name: Upload temporary APK artifact for manual builds
+        if: github.event_name == 'workflow_dispatch'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: PerformanceTracker-Optimized-Release-APKs
           path: build/app/outputs/flutter-apk/*-release.apk
           if-no-files-found: error
+          retention-days: 1
       - name: Attach signed ABI-specific APKs to tagged GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
