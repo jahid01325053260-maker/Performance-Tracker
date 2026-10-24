@@ -98,10 +98,12 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
   }
 
   Future<void> _load() async {
-    if (mounted) setState(() {
-      loading = result == null;
-      pageError = null;
-    });
+    if (mounted) {
+      setState(() {
+        loading = result == null;
+        pageError = null;
+      });
+    }
     try {
       final enabled = await service.autoCheckEnabled();
       final checked = result ?? await service.checkForUpdate();
