@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:performance_tracker_flutter/services/update_service.dart';
 
@@ -36,5 +37,30 @@ void main() {
 
     expect(release.version, '1.3.0');
     expect(release.assets.single.name, 'app-arm64-v8a-release.apk');
+  });
+  test('Windows updater selects the setup EXE from release assets', () {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+
+    final release = AppRelease.fromJson(<String, dynamic>{
+      'tag_name': 'V1.3',
+      'assets': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'name': 'PerformanceTracker-windows-x64-portable.zip',
+          'browser_download_url': 'https://example.invalid/portable.zip',
+          'size': 2000,
+        },
+        <String, dynamic>{
+          'name': 'PerformanceTracker-windows-x64-setup.exe',
+          'browser_download_url': 'https://example.invalid/setup.exe',
+          'size': 3000,
+        },
+      ],
+    });
+
+    final service = UpdateService();
+    addTearDown(service.close);
+    final asset = service.compatibleWindowsInstaller(release);
+    expect(asset?.name, 'PerformanceTracker-windows-x64-setup.exe');
   });
 }
