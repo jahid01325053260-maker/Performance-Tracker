@@ -137,7 +137,19 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Icon(Icons.insights_rounded, size: 68, color: Palette.primary),
+              Center(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(22),
+                  child: Image.asset(
+                    'assets/branding/performance_tracker_logo.png',
+                    width: 88,
+                    height: 88,
+                    fit: BoxFit.cover,
+                    filterQuality: FilterQuality.high,
+                    semanticLabel: 'Performance Tracker logo',
+                  ),
+                ),
+              ),
               const SizedBox(height: 16),
               const Text('Performance Tracker', textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 27, fontWeight: FontWeight.bold, color: Palette.dark)),

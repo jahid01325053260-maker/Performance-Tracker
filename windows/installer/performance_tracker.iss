@@ -10,6 +10,7 @@
 
 #define AppName "Performance Tracker"
 #define AppExeName "performance_tracker_flutter.exe"
+#define IconFile "..\runner\resources\app_icon.ico"
 
 [Setup]
 AppId={{A55D6B1A-7B6F-4D82-9C32-2B93D00F4E7A}
@@ -31,6 +32,7 @@ CloseApplications=yes
 RestartApplications=no
 UninstallDisplayName={#AppName}
 UninstallDisplayIcon={app}\{#AppExeName}
+SetupIconFile={#IconFile}
 SetupLogging=yes
 
 [Files]

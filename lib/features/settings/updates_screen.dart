@@ -16,10 +16,15 @@ Future<bool> showUpdateAvailableDialog(
   return await showDialog<bool>(
         context: context,
         builder: (dialog) => AlertDialog(
-          icon: const CircleAvatar(
-            radius: 34,
-            backgroundColor: Palette.pale,
-            child: Icon(Icons.auto_awesome, size: 34, color: Palette.primary),
+          icon: ClipRRect(
+            borderRadius: BorderRadius.circular(18),
+            child: Image.asset(
+              'assets/branding/performance_tracker_logo.png',
+              width: 68,
+              height: 68,
+              fit: BoxFit.cover,
+              filterQuality: FilterQuality.high,
+            ),
           ),
           title: const Text('Update Available', textAlign: TextAlign.center),
           content: ConstrainedBox(
@@ -437,9 +442,15 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
                     children: [
                       Row(
                         children: [
-                          const CircleAvatar(
-                            backgroundColor: Palette.pale,
-                            child: Icon(Icons.auto_awesome, color: Palette.primary),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Image.asset(
+                              'assets/branding/performance_tracker_logo.png',
+                              width: 40,
+                              height: 40,
+                              fit: BoxFit.cover,
+                              filterQuality: FilterQuality.high,
+                            ),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
@@ -534,10 +545,15 @@ class _UpdateHero extends StatelessWidget {
         ),
         child: Row(
           children: [
-            const CircleAvatar(
-              radius: 30,
-              backgroundColor: Color(0x33FFFFFF),
-              child: Icon(Icons.new_releases_outlined, size: 34, color: Colors.white),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Image.asset(
+                'assets/branding/performance_tracker_logo.png',
+                width: 60,
+                height: 60,
+                fit: BoxFit.cover,
+                filterQuality: FilterQuality.high,
+              ),
             ),
             const SizedBox(width: 16),
             Expanded(
