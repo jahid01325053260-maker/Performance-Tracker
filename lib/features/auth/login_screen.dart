@@ -1,11 +1,14 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/theme.dart';
 import '../../services/session.dart';
 import '../../services/api.dart';
 import '../../services/remembered_login.dart';
+import '../../services/update_service.dart';
 import '../../models/entities.dart';
 import '../employees/sales_manager_picker.dart';
+import '../settings/updates_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key, required this.session});
@@ -28,6 +31,29 @@ class _LoginScreenState extends State<LoginScreen> {
   void initState() {
     super.initState();
     loadSaved();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkWindowsUpdate());
+  }
+
+  Future<void> _checkWindowsUpdate() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.windows) return;
+    final updater = UpdateService();
+    try {
+      if (!await updater.autoCheckEnabled()) return;
+      final result = await updater.checkForUpdate();
+      if (!mounted || !result.updateAvailable) return;
+      final open = await showUpdateAvailableDialog(context, result);
+      if (!mounted || !open) return;
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(
+          builder: (_) => UpdatesScreen(initialResult: result),
+        ),
+      );
+    } catch (_) {
+      // A failed update check must never block login. The user can retry from
+      // Settings > Updates after signing in.
+    } finally {
+      updater.close();
+    }
   }
 
   Future<void> loadSaved() async {
