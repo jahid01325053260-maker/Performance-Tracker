@@ -87,12 +87,44 @@ flutter run --dart-define=UPDATE_GITHUB_REPOSITORY=OWNER/REPOSITORY
 
 Updater debug APK ignore করে। Production release-এ নিম্নের মতো release APK থাকতে হবে:
 
-- `app-arm64-v8a-release.apk`
-- `app-armeabi-v7a-release.apk`
-- `app-x86_64-release.apk`
+- `PerformanceTracker-arm64-v8a.apk`
+- `PerformanceTracker-armeabi-v7a.apk`
+- `PerformanceTracker-x86_64.apk`
 
 Workflow বর্তমানে এই ফাইলগুলোই তৈরি করে।
 
 ## GitHub/Play policy note
 
 এই implementation GitHub/sideload distribution-এর জন্য। Android 8+ এ app থেকে package installer request করতে `REQUEST_INSTALL_PACKAGES` declaration লাগে; included CI script generated Android manifest-এ এটি যোগ করে। Google Play-এ publish করলে এই permission-এর policy আলাদা—Play distribution-এর জন্য Google Play In-App Updates ব্যবহার করাই উপযুক্ত।
+
+## Windows EXE release + in-app update
+
+Windows-এর raw Flutter `.exe` একা distribute করা যাবে না, কারণ একই folder-এর DLL এবং `data` directory-ও দরকার। Desktop workflow এখন পুরো Windows release bundle-কে Inno Setup দিয়ে একটি self-contained installer বানায়:
+
+- `PerformanceTracker-windows-x64-setup.exe` — normal install/update-এর জন্য; Windows updater এটিই ব্যবহার করে।
+- `PerformanceTracker-windows-x64-portable.zip` — manual/portable fallback; updater এটি install করে না।
+
+### Release করার নিয়ম
+
+Tag push করলে `v*` এবং `V*` দুটো format-ই support করে, যেমন `v1.3.0` বা `V1.3`। Windows workflow tag থেকে app-এর internal version নির্ধারণ করে (`V1.3` → `1.3.0`), তাই install-এর পর একই update বারবার দেখাবে না।
+
+আগে তৈরি করা release-এ Windows files যোগ করতে:
+
+1. GitHub → **Actions** → **Desktop Builds** → **Run workflow**।
+2. `release_tag`-এ existing tag লিখুন, যেমন `V1.3`।
+3. Windows job সফল হলে ওই GitHub Release-এর Assets-এ setup EXE এবং portable ZIP যোগ হবে।
+
+### Windows app-এর update flow
+
+- App launch-এর সময় Auto Check enabled থাকলে GitHub latest release check হবে।
+- Logged-out অবস্থায় Windows Login screen থেকেও check হবে; logged-in অবস্থায় Dashboard-এর existing auto-check চলবে।
+- নতুন version থাকলে Android-এর মতো Update Available dialog দেখাবে।
+- Updates screen-এ **Download & Install** চাপলে `PerformanceTracker-windows-x64-setup.exe` download হবে।
+- Download শেষে installer silent mode-এ চালু হবে, পুরনো app বন্ধ হবে, files replace হবে, এবং updated Performance Tracker আবার চালু হবে।
+- Installer current user-এর `%LOCALAPPDATA%\\Programs\\PerformanceTracker` path ব্যবহার করে, তাই সাধারণভাবে Administrator permission প্রয়োজন হয় না।
+
+প্রথমবার কোনো পুরনো portable Windows build থেকে updater ব্যবহার করলে installer নতুন stable install location তৈরি করবে। এরপর Start Menu/Desktop shortcut-এর installed copy ব্যবহার করুন; পুরনো portable copy আলাদাভাবে রেখে চালালে সেটি আবার পুরনো version হিসেবেই update চাইতে পারে।
+
+### Windows security note
+
+Installer code-signing certificate না থাকলে Windows SmartScreen প্রথম install-এ warning দেখাতে পারে। এটি updater-এর version/download logic-এর failure নয়। Public distribution-এর জন্য trusted Windows code-signing certificate দিয়ে setup EXE sign করা ভালো।
